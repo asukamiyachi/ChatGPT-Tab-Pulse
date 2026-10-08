@@ -6,6 +6,12 @@
   let connecting = false;
   let controller = null;
   let generation = 0;
+  let lastSnapshot = null;
+  function clearSnapshot() {
+    lastSnapshot = null;
+    $('codex-values').hidden = true;
+    delete $('codex-panel').dataset.freshness;
+  }
   function message(text, level = 'info') {
     $('codex-message').textContent = text;
     $('codex-message').dataset.level = level;
@@ -30,7 +36,8 @@
   function renderSnapshot(data) {
     const now = Date.now();
     const parsed = core.parseSnapshot(data, now);
-    if (!parsed) { $('codex-values').hidden = true; message('取得データの形式が不正です。更新を確認してください。', 'error'); return; }
+    if (!parsed) { clearSnapshot(); message('取得データの形式が不正です。更新を確認してください。', 'error'); return; }
+    lastSnapshot = data;
     $('codex-values').hidden = false;
     $('codex-panel').dataset.freshness = parsed.freshness;
     const stale = parsed.freshness === 'stale';
@@ -53,39 +60,49 @@
     // The token is never written to a URL, DOM value after connect, log, or content script.
     try {
       if (!(await chrome.permissions.contains({ origins: [core.PERMISSION] }))) {
-        $('codex-values').hidden = true;
+        clearSnapshot();
         message('接続先へのアクセス権がありません。もう一度接続してください。', 'error');
         return;
       }
       const token = await getToken();
-      if (!core.validToken(token)) { showConnected(false); $('codex-values').hidden = true; message('トークンを再入力してください。'); return; }
+      if (!core.validToken(token)) { showConnected(false); clearSnapshot(); message('トークンを再入力してください。'); return; }
       controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      let response;
+      const requestController = controller;
+      let timeoutId;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          requestController.abort();
+          reject(new Error('Codex usage request timed out'));
+        }, 8000);
+      });
       try {
-        response = await fetch(core.API_ENDPOINT, {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-          redirect: 'error',
-          cache: 'no-store',
-          credentials: 'omit',
-          referrerPolicy: 'no-referrer',
-          signal: controller.signal
-        });
-      } finally { clearTimeout(timeout); }
-      if (mine !== generation) return;
-      if (!response.ok) {
-        $('codex-values').hidden = true;
-        const description = response.status === 401 ? '読み取り専用トークンが無効または期限切れです。' :
-          response.status === 404 ? 'まだ使用量データがありません。Mac側の同期を確認してください。' :
-          response.status === 503 ? 'Codex Usage Managerが現在利用できません。' : `取得に失敗しました（HTTP ${response.status}）。`;
-        message(description, 'error');
-        return;
-      }
-      const data = await response.json();
-      if (mine === generation) renderSnapshot(data);
+        const response = await Promise.race([
+          fetch(core.API_ENDPOINT, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+            redirect: 'error',
+            cache: 'no-store',
+            credentials: 'omit',
+            referrerPolicy: 'no-referrer',
+            signal: requestController.signal
+          }),
+          timeoutPromise
+        ]);
+        if (mine !== generation) return;
+        if (!response.ok) {
+          clearSnapshot();
+          const description = response.status === 401 ? '読み取り専用トークンが無効または期限切れです。' :
+            response.status === 404 ? 'まだ使用量データがありません。Mac側の同期を確認してください。' :
+            response.status === 503 ? 'Codex Usage Managerが現在利用できません。' : `取得に失敗しました（HTTP ${response.status}）。`;
+          message(description, 'error');
+          return;
+        }
+        // Cover both response headers and JSON body; a stalled body must not freeze controls.
+        const data = await Promise.race([response.json(), timeoutPromise]);
+        if (mine === generation) renderSnapshot(data);
+      } finally { clearTimeout(timeoutId); }
     } catch (_) {
-      if (mine === generation) { $('codex-values').hidden = true; message('接続できません。ネットワーク・API・同期状況を確認してください。', 'error'); }
+      if (mine === generation) { clearSnapshot(); message('接続できません。ネットワーク・API・同期状況を確認してください。', 'error'); }
     } finally { controller = null; setBusy(false); }
   }
   $('codex-connect-form').addEventListener('submit', async (event) => {
@@ -116,14 +133,20 @@
     try {
       await chrome.storage.session.remove(core.TOKEN_KEY);
       await chrome.permissions.remove({origins: [core.PERMISSION]});
-      $('codex-values').hidden = true;
-      delete $('codex-panel').dataset.freshness;
+      clearSnapshot();
       $('codex-token').value = '';
       showConnected(false);
       message('切断しました。トークンをセッションから削除しました。');
     } catch (_) { message('切断に失敗しました。拡張機能の設定を確認してください。', 'error'); }
     finally { setBusy(false); }
   });
+  // Reclassify a cached snapshot as it ages, without another API call or token access.
+  // Never resurrect values after an error or disconnect (clearSnapshot resets the cache).
+  setInterval(() => {
+    if (!lastSnapshot) return;
+    const parsed = core.parseSnapshot(lastSnapshot);
+    if (!parsed || parsed.freshness !== $('codex-panel').dataset.freshness) renderSnapshot(lastSnapshot);
+  }, 15000);
   (async () => {
     try {
       const token = await getToken();

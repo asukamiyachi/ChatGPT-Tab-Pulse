@@ -1,5 +1,7 @@
 """Codex panel browser test with mocked Chrome APIs, no real token, no network."""
 from pathlib import Path
+import os
+import tempfile
 import re
 from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +18,7 @@ MOCK = r'''() => {
     bankedResets:{availableCount:0}
   };
   window.__http = 200;
+  window.__stalledBody = false;
   window.chrome = {
     tabs:{query:async()=>[],sendMessage:async()=>{},update:async()=>{}},
     windows:{update:async()=>{}},runtime:{sendMessage:async()=>({ok:true,tabs:[]})},
@@ -25,11 +28,11 @@ MOCK = r'''() => {
   };
   window.fetch = async (url,options) => {
     window.__url=url;window.__headers=options.headers;
-    return {ok:window.__http===200,status:window.__http,json:async()=>window.__response};
+    return {ok:window.__http===200,status:window.__http,json:async()=>window.__stalledBody ? new Promise(() => {}) : window.__response};
   };
 }'''
 with sync_playwright() as p:
-    browser = p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+    browser = p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or ('/usr/bin/chromium' if Path('/usr/bin/chromium').exists() else None),headless=True,args=['--no-sandbox'])
     try:
         page=browser.new_page(viewport={'width':430,'height':940})
         html=re.sub(r'<script[^>]*>.*?</script>','',(ROOT/'popup.html').read_text(),flags=re.S)
@@ -53,7 +56,21 @@ with sync_playwright() as p:
         assert page.locator('#codex-token').input_value() == ''
         assert 'sample_test_read_token' not in page.content()
         print('PASS: explicit permission, read-only request, token not left in DOM, correct usage display')
-        page.screenshot(path='/mnt/data/chatgpt-tab-pulse-v0.5-preview.png',full_page=True)
+        page.screenshot(path=str(Path(tempfile.gettempdir()) / 'chatgpt-tab-pulse-v0.5-preview.png'),full_page=True)
+        page.clock.install()
+        page.clock.fast_forward(31 * 60 * 1000)
+        page.wait_for_function("document.querySelector('#codex-panel').dataset.freshness === 'stale'")
+        assert page.locator('#codex-five-value').inner_text() == '参考値（古いデータ）'
+        print('PASS: cached usage automatically becomes stale after 30 minutes without network')
+        page.evaluate("window.__response.receivedAt = new Date().toISOString(); window.__stalledBody = true")
+        page.locator('#codex-refresh').click()
+        page.wait_for_function("document.querySelector('#codex-refresh').disabled")
+        page.clock.fast_forward(8500)
+        page.wait_for_function("document.querySelector('#codex-message').textContent.includes('接続できません')")
+        assert not page.locator('#codex-refresh').is_disabled()
+        assert page.locator('#codex-values').is_hidden()
+        print('PASS: stalled JSON response times out and controls recover')
+        page.evaluate("window.__stalledBody = false")
         page.evaluate("window.__response.receivedAt = new Date(Date.now()-3600000).toISOString()")
         page.locator('#codex-refresh').click()
         page.wait_for_function("document.querySelector('#codex-panel').dataset.freshness === 'stale'")
@@ -63,6 +80,8 @@ with sync_playwright() as p:
         page.evaluate('window.__http=401')
         page.locator('#codex-refresh').click()
         page.wait_for_function("document.querySelector('#codex-message').textContent.includes('無効または期限切れ')")
+        page.clock.fast_forward(30000)
+        assert page.locator('#codex-values').is_hidden()
         assert page.locator('#codex-values').is_hidden()
         print('PASS: auth failure clears visible values')
         page.locator('#codex-disconnect').click()

@@ -74,7 +74,7 @@ python3 tests/popup_smoke.py
 python3 tests/codex-popup-smoke.py
 ```
 
-テストはNode.js標準テストランナーとPlaywright/Chromiumの擬似ChatGPT画面を使用します（`python3 -m pip install playwright` 等が必要）。**ログイン済みの実ChatGPT Work / macOSシステム通知 / 個人本番Codexトークンを使ったE2Eは未確認**です。実際のChromeで、2タブ同時実行・完了・Work確認待ち・通知クリックを追加確認してください。
+GitHub ActionsのCIはNode.js単体テスト・構文チェック・Playwright/Chromiumの3種類のブラウザテストを実施します。ローカルのテストもNode.js標準テストランナーとPlaywright/Chromiumの擬似ChatGPT画面を使用します（`python3 -m pip install playwright` 等が必要）。**ログイン済みの実ChatGPT Work / macOSシステム通知 / 個人本番Codexトークンを使ったE2Eは未確認**です。実際のChromeで、2タブ同時実行・完了・Work確認待ち・通知クリックを追加確認してください。
 
 ## ファイル構成
 

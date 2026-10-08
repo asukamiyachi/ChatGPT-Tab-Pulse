@@ -1,5 +1,6 @@
 """Mock DOM smoke test in headless Chromium. No ChatGPT account or network required."""
 from pathlib import Path
+import os
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,7 +10,7 @@ HTML = """<!doctype html><html lang='ja'><head><title>Mock ChatGPT</title>
 </form></main></body></html>"""
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(executable_path='/usr/bin/chromium', headless=True, args=['--no-sandbox'])
+    browser = p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or ('/usr/bin/chromium' if Path('/usr/bin/chromium').exists() else None), headless=True, args=['--no-sandbox'])
     try:
         page = browser.new_page()
         page.set_content(HTML)
