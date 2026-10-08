@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Tab Pulse",
-  "version": "0.4.0",
-  "description": "ChatGPT Chat/Workのタブ状態と実行時間を表示し、任意で完了・確認待ち・長時間実行を通知します。",
+  "version": "0.5.0",
+  "description": "ChatGPT Chat/Workのタブ状態と実行時間を表示し、任意で完了・確認待ち・長時間実行を通知し、Codex使用枠を表示します。",
   "permissions": [
     "storage",
     "alarms"
@@ -61,5 +61,8 @@
   },
   "optional_permissions": [
     "notifications"
+  ],
+  "optional_host_permissions": [
+    "https://codex-usage-manager.vercel.app/*"
   ]
 }

@@ -11,7 +11,7 @@
     <header>
       <div class="logo" aria-hidden="true">P</div>
       <div class="brand-text">
-        <h1>ChatGPT Tab Pulse <span class="version">v0.4</span></h1>
+        <h1>ChatGPT Tab Pulse <span class="version">v0.5</span></h1>
         <p class="subtitle">推論・Work のリアルタイム状態</p>
       </div>
     </header>
@@ -84,6 +84,28 @@
       <p id="notification-status" class="setting-note" role="status" aria-live="polite">通知をオンにした時だけChromeの許可を求めます。</p>
     </section>
 
+    <section class="codex-section" aria-label="Codex 使用枠" id="codex-panel">
+      <div class="section-header"><h2>Codex 使用枠</h2><span class="section-note" id="codex-link-status">未接続</span></div>
+      <p class="codex-explain">既存のCodex Usage Managerと連携。個人用・読み取り専用。追加購入したクレジットの金額残高は未対応です。</p>
+      <form id="codex-connect-form" class="codex-connect-form" autocomplete="off">
+        <label for="codex-token">読み取り専用トークン（readToken）</label>
+        <input id="codex-token" type="password" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="Macのpair.jsonにあるreadToken" maxlength="2048" aria-describedby="codex-secret-help">
+        <p id="codex-secret-help" class="codex-explain">トークンはブラウザのセッション領域だけに保存され、Chromeの完全終了後は再入力が必要です。</p>
+        <button class="codex-primary" id="codex-connect" type="submit">接続する</button>
+      </form>
+      <div id="codex-connected-controls" class="codex-connected-controls" hidden>
+        <button type="button" id="codex-refresh" class="codex-primary">使用枠を更新</button>
+        <button type="button" id="codex-disconnect" class="codex-secondary">接続を解除</button>
+      </div>
+      <p id="codex-message" class="codex-message" role="status" aria-live="polite">接続するまでCodex使用枠は取得しません。</p>
+      <div id="codex-values" hidden>
+        <div class="codex-usage-row"><div class="codex-usage-top"><strong>5時間の使用枠</strong><span id="codex-five-value">—</span></div><progress id="codex-five-bar" max="100" value="0"></progress><span class="codex-reset" id="codex-five-reset">—</span></div>
+        <div class="codex-usage-row"><div class="codex-usage-top"><strong>週間の使用枠</strong><span id="codex-weekly-value">—</span></div><progress id="codex-weekly-bar" max="100" value="0"></progress><span class="codex-reset" id="codex-weekly-reset">—</span></div>
+        <div class="codex-meta"><span>Banked Resets</span><strong id="codex-banked">—</strong></div>
+        <div class="codex-meta"><span>最終同期</span><span id="codex-last-sync">—</span></div>
+      </div>
+    </section>
+
     <div class="legend-title">アイコンの意味</div>
     <div class="legend" aria-label="ファビコン状態一覧">
       <div><img src="icons/idle-32.png" alt=""><span>待機 / 完了確認済</span></div>
@@ -97,5 +119,7 @@
   <script src="src/overview.js"></script>
   <script src="src/notifications.js"></script>
   <script src="popup.js"></script>
+  <script src="src/codex-usage.js"></script>
+  <script src="src/codex-panel.js"></script>
 </body>
 </html>

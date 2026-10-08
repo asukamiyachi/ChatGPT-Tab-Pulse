@@ -1,5 +1,7 @@
 """Popup UI smoke test in Chromium with a mocked Chrome API. No account/network."""
 from pathlib import Path
+import os
+import tempfile
 import base64
 import re
 from playwright.sync_api import sync_playwright
@@ -28,7 +30,7 @@ MOCK_API = r'''() => {
 }'''
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+    browser = p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or ('/usr/bin/chromium' if Path('/usr/bin/chromium').exists() else None),headless=True,args=['--no-sandbox'])
     try:
         page = browser.new_page(viewport={'width': 410,'height': 860})
         html = (ROOT/'popup.html').read_text()
@@ -56,7 +58,7 @@ with sync_playwright() as p:
         print('PASS: tab rows and current tab marker')
         assert page.locator('#tab-list img').count() == 0
         assert page.locator('#tab-list button').last.locator('img').count() == 0
-        page.screenshot(path='/mnt/data/chatgpt-tab-pulse-popup-v0.4-preview.png',full_page=True)
+        page.screenshot(path=str(Path(tempfile.gettempdir()) / 'chatgpt-tab-pulse-popup-v0.4-preview.png'),full_page=True)
         page.evaluate("window.__overviews[3].title = '<img src=x onerror=alert(1)>'")
         page.wait_for_function("Array.from(document.querySelectorAll('#tab-list .tab-title')).some(x => x.textContent.includes('<img src=x onerror=alert(1)>'))",timeout=6000)
         assert page.locator('#tab-list img').count() == 0
