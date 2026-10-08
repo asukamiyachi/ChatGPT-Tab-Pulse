@@ -1,6 +1,6 @@
-# ChatGPT Tab Pulse v0.4.0
+# ChatGPT Tab Pulse v0.5.0
 
-Chromeで開いたChatGPTの通常Chat・Workについて、**ファビコン・実行中タブ数のバッジ・全タブ一覧・実行時間・オプトインの通知**を表示する非公式の個人向け拡張機能です。外部サーバーやOpenAI非公開APIは使用しません。
+Chromeで開いたChatGPTの通常Chat・Workについて、**ファビコン・実行中タブ数のバッジ・全タブ一覧・実行時間・オプトインの通知**を表示する非公式の個人向け拡張機能です。Chat/Workの監視ではOpenAI非公開APIを使用しません。Codex連携を明示的にONにした場合のみ、既存のCodex Usage Manager APIへHTTPS通信します。
 
 > **判定は画面上のUIからの推測です。公式な推論・WorkステータスAPIではありません。** Workは画面の構造やタスクの進行方法によって「状態不明」になります。ブラウザのタブを閉じた後にクラウド側で継続するWorkは追跡しません。実Work画面での自動判定は未検証です。
 
@@ -33,9 +33,20 @@ Chromeで開いたChatGPTの通常Chat・Workについて、**ファビコン・
 - タブの破棄・スリープ・閉鎖中や通信不能時は、通知や実行時間が遅延・停止する場合があります。
 - 完了・確認待ちの自動判定はベストエフォートで、推論やクラウドタスクの終了を保証しません。
 
+## v0.5 Codex Usage Manager 連携（任意）
+
+- 既存の `https://codex-usage-manager.vercel.app/api/usage` に**読み取り専用** Bearerトークンで接続し、5時間/週間の使用枠（残り%）、各リセット時刻、Banked Resets、最終同期時刻を表示します。**追加購入クレジットの金額残高はこのAPIのスキーマに含まれず、取得未対応です。** 残り%を金銭クレジット額と混同しないでください。
+- 初期状態では未接続でネットワークアクセスも発生しません。「接続する」を押した場合にのみ `optional_host_permissions` のCodex Usage Managerオリジンを要求します。ChatGPTホストの既存権限はそのままです。
+- Macのペアリング設定ファイル `~/.codex-usage-manager/pair.json` の**`readToken`のみ**を拡張機能の入力欄に貼り付けてください。`installationToken` や `~/.codex/auth.json`、ChatGPT Cookieは**絶対に貼り付けない**でください。トークンをチャット・Issue・README・スクリーンショットに記載しないでください。
+- `readToken` は拡張機能の `chrome.storage.session`（Chrome標準の非永続・信頼された拡張機能コンテキスト）だけに保存します。`localStorage`、`chrome.storage.local/sync`、ページ本文、URL、コンソールログには保存しません。**Chromeを完全終了すると再入力が必要です**。接続解除ではトークンとオプション権限を削除します。
+- 通信はポップアップの拡張機能コンテキストのみで実施し、ChatGPTへのコンテンツスクリプトにはトークンを渡しません。URLは固定、リダイレクト不可、ブラウザCookie非送信、HTTPSのみ。認証失敗時に値を破棄します。
+- **同期鮮度：**サーバーが最後に受信した `receivedAt` から15分以内は「Fresh」、15～30分は「Delayed」、30分超は「Stale」。Staleの場合、古い値を現在の残高としては表示しません。Mac Collectorの標準同期間隔は10分ですが環境次第で遅れることがあります。
+- 取得失敗時は個別に表示します：401（読み取り認証エラー）、404（同期データなし）、503（サーバー一時利用不可）、通信失敗・タイムアウト、レスポンス不正。値が `null` の場合はゼロではなく「未取得」と表示します。
+- サーバー側 `codex-usage-manager` の変更はありません。認証済み `/api/usage` APIと現行スキーマで機能するため、変更PRは不要です。実際の個人本番トークンとmacOS通知のE2Eは未検証です。
+
 ## インストール / 更新（macOS Chrome）
 
-1. `chatgpt-tab-pulse-v0.4.0.zip` をダウンロードし、**解凍**してください。
+1. `ChatGPT-Tab-Pulse-v0.5.0.zip` をダウンロードし、**解凍**してください。
 2. Chromeの `chrome://extensions/` を開き、右上の「デベロッパーモード」をONにします。
 3. 「パッケージ化されていない拡張機能を読み込む」を押し、`manifest.json` が直下にある解凍フォルダを選択します。
 4. 開いているすべてのChatGPTタブを再読み込みします。ツールバーにピン留めするとバッジを確認しやすくなります。
@@ -49,9 +60,9 @@ Chromeで開いたChatGPTの通常Chat・Workについて、**ファビコン・
 - `storage`：設定・実行状態・重複通知防止データをローカル/セッションで保存。会話本文は保存しません。
 - `alarms`：**任意の長時間アラート**が有効な場合に、Chromeのバックグラウンドで1分ごとに実行中時間を確認。
 - `optional_permissions: ["notifications"]`：初期状態では通知権限不要。設定をONにした際にだけユーザーに要求。
-- `host_permissions`：`https://chatgpt.com/*`, `https://chat.openai.com/*` のみに限定。他サイト・履歴全体へのアクセス権は取りません。
+- `host_permissions`：ChatGPTの2ホストのみ。`optional_host_permissions`：Codex Usage Manager本番オリジンのみ。ユーザーが「接続する」を押すまで付与されません。
 - バックグラウンドに共有するのは `state`（進行状態）、`mode`、`startedAt`、確証フラグとモード指定だけ。タブタイトルは一覧を開いたとき表示しますが、通知の文面には含めません。
-- 外部送信・収益化SDK・広告・テレメトリー・パスワード読み取り・ネットワーク通信傍受なし。
+- ChatGPT会話内容の外部送信・収益化SDK・広告・テレメトリー・パスワード読み取り・ネットワーク通信傍受なし。Codex連携がONのときに限り、読み取りトークン付きリクエストを専用HTTPS APIへ送信します。
 
 ## テスト
 
@@ -60,9 +71,10 @@ node --test tests/*.test.js
 for f in background.js popup.js src/*.js; do node --check "$f"; done
 python3 tests/browser_smoke.py
 python3 tests/popup_smoke.py
+python3 tests/codex-popup-smoke.py
 ```
 
-テストはNode.js標準テストランナーとPlaywright/Chromiumの擬似ChatGPT画面を使用します（`python3 -m pip install playwright` 等が必要）。**ログイン済みの実ChatGPT Work / macOSシステム通知としてのE2Eは未確認**です。実際のChromeで、2タブ同時実行・完了・Work確認待ち・通知クリックを追加確認してください。
+テストはNode.js標準テストランナーとPlaywright/Chromiumの擬似ChatGPT画面を使用します（`python3 -m pip install playwright` 等が必要）。**ログイン済みの実ChatGPT Work / macOSシステム通知 / 個人本番Codexトークンを使ったE2Eは未確認**です。実際のChromeで、2タブ同時実行・完了・Work確認待ち・通知クリックを追加確認してください。
 
 ## ファイル構成
 
@@ -74,7 +86,9 @@ python3 tests/popup_smoke.py
 │   ├── content.js              DOM監視、安定判定、ファビコン変更
 │   ├── detector.js             Chat / Work状態の純粋関数
 │   ├── overview.js             状態別集計・バッジ・並べ替え
-│   └── notifications.js        通知の保守的な判定ポリシー
+│   ├── notifications.js        通知の保守的な判定ポリシー
+│   ├── codex-usage.js          読み取りデータの検証・整形
+│   └── codex-panel.js          任意のCodex API接続と画面描画
 ├── icons/                      拡張機能・ファビコン画像
 └── tests/                      単体テスト・擬似ブラウザテスト
 ```

@@ -74,3 +74,30 @@ footer{font-size:10px;color:#7e8fa1;line-height:1.5;margin-top:17px}
 .notify-options .timer-select select{width:110px}
 .setting-note{font-size:10.5px;line-height:1.55;color:#91a2b6;min-height:18px}
 .tab-elapsed{font-variant-numeric:tabular-nums;font-size:10px;white-space:nowrap;color:#ffc36d}
+
+
+/* Codex integration is optional and never affects the ChatGPT monitoring UI. */
+.codex-section{margin-top:17px;padding:14px;border:1px solid #30435a;border-radius:13px;background:#111d2b}
+.codex-explain{font-size:10.5px;line-height:1.65;color:#9dadc1;margin:8px 0 10px}
+.codex-connect-form{display:flex;flex-direction:column;gap:7px}
+.codex-connect-form label{font-weight:650;font-size:11px}
+.codex-connect-form input{min-width:0;width:100%;padding:10px 11px;background:#0d1521;color:#e6edf3;border:1px solid #3b4d63;border-radius:8px;font:inherit}
+.codex-connect-form input:focus-visible{outline:2px solid #76c5e8;outline-offset:1px}
+.codex-primary,.codex-secondary{font:inherit;border:1px solid #42617c;border-radius:8px;padding:9px 12px;cursor:pointer}
+.codex-primary{color:#0b1f31;background:#80d1ed;font-weight:750}
+.codex-secondary{color:#dce9f4;background:#1d2c3d}
+.codex-primary:disabled,.codex-secondary:disabled{opacity:.55;cursor:wait}
+.codex-connected-controls{display:flex;gap:9px}
+.codex-connected-controls[hidden],#codex-values[hidden],#codex-connect-form[hidden]{display:none}
+.codex-message{font-size:10.5px;line-height:1.5;color:#aebfd2;margin:10px 0}
+.codex-message[data-level="error"]{color:#ffb0a4}
+.codex-message[data-level="delayed"]{color:#ffd68a}
+.codex-usage-row{padding:11px 0;border-top:1px solid #2b3b4e}
+.codex-usage-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;gap:8px;font-size:12px}
+.codex-usage-top span{font-weight:760;font-variant-numeric:tabular-nums;color:#88e3c0}
+.codex-usage-row progress{display:block;width:100%;height:8px;accent-color:#52d6ab}
+.codex-reset{display:block;font-size:10px;margin-top:6px;color:#9dadc1;line-height:1.5}
+.codex-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;padding:5px 0;color:#b4c6d9}
+.codex-meta strong{color:#e6edf3;font-variant-numeric:tabular-nums}
+.codex-section[data-freshness="stale"] .codex-usage-top span{color:#ffcc85}
+.codex-usage-row progress[hidden]{display:none}
