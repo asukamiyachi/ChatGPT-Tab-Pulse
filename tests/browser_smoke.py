@@ -1,0 +1,66 @@
+"""Mock DOM smoke test in headless Chromium. No ChatGPT account or network required."""
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+
+ROOT = Path(__file__).resolve().parents[1]
+HTML = """<!doctype html><html lang='ja'><head><title>Mock ChatGPT</title>
+<link rel='icon' href='/original.ico'></head><body><main><form data-chatgpt-composer>
+<textarea id='prompt-textarea'></textarea><button type='submit' data-testid='send-button'>Send</button>
+</form></main></body></html>"""
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(executable_path='/usr/bin/chromium', headless=True, args=['--no-sandbox'])
+    try:
+        page = browser.new_page()
+        page.set_content(HTML)
+        page.evaluate('''() => {
+          globalThis.chrome = {
+            runtime: {getURL: p => 'https://example.invalid/'+p,
+              sendMessage: async () => undefined,
+              onMessage: {addListener: fn => globalThis.__testMessageListener = fn}},
+            storage: {local: {get: (defaults,fn) => fn({enabled:true})},
+              onChanged:{addListener: fn => globalThis.__testStorageListener = fn}}
+          };
+        }''')
+        page.add_script_tag(path=str(ROOT/'src'/'detector.js'))
+        page.add_script_tag(path=str(ROOT/'src'/'content.js'))
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('idle-32.png')", timeout=5000)
+        print('PASS: Chat idle favicon')
+        page.locator('main form').evaluate("el => {const stop = document.createElement('button');stop.type='button';stop.dataset.testid='stop-button';stop.textContent='Stop';el.appendChild(stop)}")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('thinking-32.png')")
+        print('PASS: Chat thinking favicon')
+        page.locator('[data-testid="stop-button"]').evaluate('(el)=>el.remove()')
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('idle-32.png')")
+        print('PASS: Chat returns idle')
+        page.locator('main').evaluate("el => {const b = document.createElement('button');b.setAttribute('aria-pressed','true');b.innerText='Work';el.appendChild(b)}")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('unknown-32.png')")
+        print('PASS: Work unknown without task evidence')
+        page.locator('main').evaluate("el => {const b = document.createElement('button');b.dataset.testid='stop-button';b.innerText='Stop';el.appendChild(b)}")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('working-32.png')")
+        print('PASS: Work working favicon')
+        page.locator('[data-testid="stop-button"]').evaluate('(el)=>el.remove()')
+        page.locator('main').evaluate("el => {const x=document.createElement('div');x.setAttribute('data-task-status','completed');x.setAttribute('role','status');x.textContent='Completed';el.appendChild(x)}")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('idle-32.png')")
+        print('PASS: Work completed indication')
+        page.locator('[data-task-status]').evaluate('(el)=>el.remove()')
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('unknown-32.png')")
+        print('PASS: Work returns unknown without proof')
+        # Action popup's override lets Work be explicitly selected per tab.
+        response = page.evaluate("""() => {let reply; __testMessageListener({type:'SET_MODE',mode:'chat'}, {}, (x)=>reply=x);return reply;}""")
+        assert response['state']=='idle', response
+        print('PASS: Mode override via popup message')
+        page.evaluate("""() => {
+          __testMessageListener({type:'SET_MODE',mode:'work'}, {}, () => {});
+          const d=document.createElement('div');d.setAttribute('role','dialog');
+          const b=document.createElement('button');b.textContent='Approve';
+          d.appendChild(b);document.querySelector('main').appendChild(d);
+        }""")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('attention-32.png')")
+        print('PASS: Work approval attention favicon')
+        page.evaluate("() => __testStorageListener({enabled:{newValue:false}},'local')")
+        page.wait_for_function("!document.querySelector('#chatgpt-tab-pulse-icon')")
+        assert page.locator('link[href="/original.ico"]').get_attribute('rel') == 'icon'
+        print('PASS: Disabled restores original favicon')
+        page.close()
+    finally:
+        browser.close()

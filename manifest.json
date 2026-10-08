@@ -1,0 +1,65 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Tab Pulse",
+  "version": "0.4.0",
+  "description": "ChatGPT Chat/Workのタブ状態と実行時間を表示し、任意で完了・確認待ち・長時間実行を通知します。",
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "action": {
+    "default_title": "ChatGPT Tab Pulse",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/extension-16.png",
+      "32": "icons/extension-32.png",
+      "48": "icons/extension-48.png",
+      "128": "icons/extension-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/extension-16.png",
+    "32": "icons/extension-32.png",
+    "48": "icons/extension-48.png",
+    "128": "icons/extension-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "src/detector.js",
+        "src/content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/idle-32.png",
+        "icons/thinking-32.png",
+        "icons/working-32.png",
+        "icons/attention-32.png",
+        "icons/unknown-32.png"
+      ],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ]
+    }
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "optional_permissions": [
+    "notifications"
+  ]
+}

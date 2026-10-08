@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChatGPT Tab Pulse</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div class="logo" aria-hidden="true">P</div>
+      <div class="brand-text">
+        <h1>ChatGPT Tab Pulse <span class="version">v0.4</span></h1>
+        <p class="subtitle">推論・Work のリアルタイム状態</p>
+      </div>
+    </header>
+
+    <section class="overview" aria-label="全タブの概要">
+      <div class="stat"><strong id="count-running">–</strong><span>実行中</span></div>
+      <div class="stat"><strong id="count-attention">–</strong><span>確認待ち</span></div>
+      <div class="stat"><strong id="count-idle">–</strong><span>待機中</span></div>
+      <div class="stat"><strong id="count-total">–</strong><span>全タブ</span></div>
+    </section>
+    <p class="summary-help">拡張機能のバッジ数字 = Chat / Work の実行中件数</p>
+
+    <section class="tab-section" aria-label="ChatGPTタブ一覧">
+      <div class="section-header">
+        <h2>開いているChatGPTタブ</h2>
+        <span id="list-status" class="section-note">取得中…</span>
+      </div>
+      <div id="tab-list" class="tab-list" role="group">
+        <p class="empty">読み込み中…</p>
+      </div>
+    </section>
+
+    <div class="section-header current-heading"><h2>現在のタブ</h2></div>
+    <section class="state-card" aria-live="polite">
+      <div id="state-icon" class="state-icon unknown">?</div>
+      <div class="current-info">
+        <div id="state-label" class="state-label">確認中…</div>
+        <div id="state-reason" class="state-reason">現在のタブを確認しています</div>
+      </div>
+    </section>
+    <div id="domain-note" class="domain-note" hidden>現在のタブはChatGPTではありません。上の一覧から切り替えられます。</div>
+
+    <section class="options">
+      <label class="switch-row" for="enabled">
+        <span><strong>ファビコンの切り替え</strong><small>すべてのChatGPTタブに適用</small></span>
+        <input type="checkbox" id="enabled" checked>
+      </label>
+      <div class="field">
+        <label for="mode">このタブのモード判定</label>
+        <select id="mode">
+          <option value="auto">自動判定（通常）</option>
+          <option value="chat">Chatとして扱う</option>
+          <option value="work">Workとして扱う</option>
+        </select>
+        <p id="mode-hint">Workが認識されない場合は「Workとして扱う」を選択してください。</p>
+      </div>
+    </section>
+
+    <section class="notify-options" aria-label="通知と実行時間の設定">
+      <div class="section-header"><h2>完了と確認待ちの通知</h2><span class="section-note">任意で有効化</span></div>
+      <label class="switch-row" for="notifyCompleted">
+        <span><strong>回答完了を通知</strong><small>推論中を確実に検出した場合のみ</small></span>
+        <input type="checkbox" id="notifyCompleted">
+      </label>
+      <label class="switch-row" for="notifyAttention">
+        <span><strong>Work確認待ちを通知</strong><small>承認・入力待ちの画面を検出</small></span>
+        <input type="checkbox" id="notifyAttention">
+      </label>
+      <label class="switch-row" for="notifyLongRunning">
+        <span><strong>長時間実行を通知</strong><small>指定時間を超えたタスクを1回だけ通知</small></span>
+        <input type="checkbox" id="notifyLongRunning">
+      </label>
+      <div class="field timer-select">
+        <label for="longRunningMinutes">通知までの時間</label>
+        <select id="longRunningMinutes">
+          <option value="5">5分</option><option value="10">10分</option><option value="15">15分</option>
+          <option value="30">30分</option><option value="60">60分</option>
+        </select>
+      </div>
+      <p id="notification-status" class="setting-note" role="status" aria-live="polite">通知をオンにした時だけChromeの許可を求めます。</p>
+    </section>
+
+    <div class="legend-title">アイコンの意味</div>
+    <div class="legend" aria-label="ファビコン状態一覧">
+      <div><img src="icons/idle-32.png" alt=""><span>待機 / 完了確認済</span></div>
+      <div><img src="icons/thinking-32.png" alt=""><span>Chat 応答中</span></div>
+      <div><img src="icons/working-32.png" alt=""><span>Work 実行中</span></div>
+      <div><img src="icons/attention-32.png" alt=""><span>Work 確認待ち</span></div>
+      <div><img src="icons/unknown-32.png" alt=""><span>状態不明</span></div>
+    </div>
+    <footer>非公式・ローカル動作 / 会話の内容は収集しません</footer>
+  </main>
+  <script src="src/overview.js"></script>
+  <script src="src/notifications.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
