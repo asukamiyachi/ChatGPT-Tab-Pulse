@@ -39,3 +39,22 @@ test('elapsed time never returns unverified timestamps',()=>{
   assert.equal(alerts.elapsed(null,now),'');
   assert.equal(alerts.elapsed('12',now),'');
 });
+
+test('failure requires current verified run and matching run id',()=>{
+  const failure={state:'timeout',mode:'chat',errorKind:'timeout',failureRunStartedAt:start};
+  assert.equal(alerts.shouldNotifyFailure(running,failure,now),true);
+  assert.equal(alerts.shouldNotifyFailure(null,failure,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...running,confirmed:false},failure,now),false);
+  assert.equal(alerts.shouldNotifyFailure(running,{...failure,failureRunStartedAt:start+1},now),false);
+  assert.equal(alerts.shouldNotifyFailure({...running,mode:'work'},failure,now),false);
+  assert.equal(alerts.shouldNotifyFailure(running,{...failure,state:'error',errorKind:'generation'},now),true);
+  assert.equal(alerts.shouldNotifyFailure(running,{...failure,state:'error',errorKind:'timeout'},now),false);
+  assert.equal(alerts.shouldNotifyCompletion(failure,completed,now),false);
+});
+
+test('mode thresholds default 5/20 and notifications are opt-in',()=>{
+  assert.equal(alerts.settingsFor({}).chatLongMinutes,5);
+  assert.equal(alerts.settingsFor({}).workLongMinutes,20);
+  assert.equal(alerts.settingsFor({}).notifyFailure,false);
+  assert.equal(alerts.settingsFor({notifyFailure:true,chatLongMinutes:15,workLongMinutes:45}).notifyFailure,true);
+});

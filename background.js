@@ -42,7 +42,9 @@ function recordFrom(payload, previous = null) {
     generation: ++generation,
     // Retain the run ID for only a verified completion transition.
     completionConfirmed: payload?.completionConfirmed === true,
-    completedRunStartedAt: policy.validTimestamp(payload?.completedRunStartedAt, now) ? payload.completedRunStartedAt : null
+    completedRunStartedAt: policy.validTimestamp(payload?.completedRunStartedAt, now) ? payload.completedRunStartedAt : null,
+    errorKind: payload?.errorKind === 'timeout' || payload?.errorKind === 'network' || payload?.errorKind === 'generation' ? payload.errorKind : null,
+    failureRunStartedAt: policy.validTimestamp(payload?.failureRunStartedAt, now) ? payload.failureRunStartedAt : null
   };
 }
 function tabRecord(tab, payload) {
@@ -52,7 +54,10 @@ function tabRecord(tab, payload) {
     title: tab.title || 'ChatGPT', state,
     mode: payload?.mode === 'work' ? 'work' : 'chat',
     override: payload?.override || 'auto',
-    startedAt: policy.running(state) && payload?.confirmed ? payload.startedAt : null
+    startedAt: policy.running(state) && payload?.confirmed ? payload.startedAt : null,
+    errorKind: state === 'timeout' || state === 'error' ? payload?.errorKind : null,
+    reason: state === 'timeout' ? '処理のタイムアウト表示を検出しました。状態を確認してください。' :
+      state === 'error' ? payload?.errorKind === 'network' ? '通信エラー表示を検出しました。接続状態を確認してください。' : '処理エラー表示を検出しました。内容を確認してください。' : null
   };
 }
 async function supportedTabs() {
@@ -112,7 +117,8 @@ async function showNotice(kind, id, runId, detail) {
   const settings = policy.settingsFor(await chrome.storage.local.get(policy.DEFAULTS));
   if (kind === 'completed' && !settings.notifyCompleted ||
       kind === 'attention' && !settings.notifyAttention ||
-      kind === 'long' && !settings.notifyLongRunning) return;
+      kind === 'long' && !settings.notifyLongRunning ||
+      (kind === 'timeout' || kind === 'error') && !settings.notifyFailure) return;
   if (!await chrome.permissions.contains({permissions: ['notifications']})) return;
   const key = `${kind}:${id}:${runId}`;
   if (noticeKeys.has(key)) return;
@@ -122,7 +128,9 @@ async function showNotice(kind, id, runId, detail) {
   const templates = {
     completed: ['ChatGPTの応答が完了', 'タブに戻って結果を確認できます。'],
     attention: ['ChatGPT Work が確認待ち', '承認や入力が必要な可能性があります。'],
-    long: ['ChatGPTの処理が長時間継続中', `${detail}以上実行中として検出されました。`]
+    long: ['ChatGPTの長時間実行を確認', `${detail}以上実行中です。停止と断定せず状態を確認してください。`],
+    timeout: ['ChatGPTのタイムアウト表示を検出', '対象タブでエラーを確認してください。自動再試行はしません。'],
+    error: ['ChatGPTの処理エラー表示を検出', detail === 'network' ? '通信状態を確認してください。自動再試行はしません。' : '対象タブでエラーを確認してください。']
   };
   const [title, message] = templates[kind];
   try {
@@ -139,17 +147,28 @@ async function considerNotification(id, before, after) {
   if (policy.shouldNotifyAttention(before, after)) {
     await showNotice('attention', id, after.attentionSince);
   }
+  if (policy.shouldNotifyFailure(before, after)) {
+    await showNotice(after.state, id, after.failureRunStartedAt, after.errorKind);
+  }
 }
 async function checkLongRunning() {
   await ready;
   const settings = policy.settingsFor(await chrome.storage.local.get(policy.DEFAULTS));
   if (!settings.notifyLongRunning || !await chrome.permissions.contains({permissions: ['notifications']})) return;
-  const live = new Set((await supportedTabs()).map(tab => tab.id));
+  const tabs = await supportedTabs();
   const now = Date.now();
-  for (const [id, rec] of statuses) {
-    if (live.has(id) && policy.shouldNotifyLong(rec, now, settings.longRunningMinutes)) {
-      await showNotice('long', id, rec.startedAt, `${settings.longRunningMinutes}分`);
-    }
+  for (const tab of tabs) {
+    const rec = statuses.get(tab.id);
+    if (!rec || !policy.running(rec.state) || rec.confirmed !== true) continue;
+    const minutes = rec.mode === 'work' ? settings.workLongMinutes : settings.chatLongMinutes;
+    if (!policy.shouldNotifyLong(rec, now, minutes)) continue;
+    // A suspended/discarded tab or lost content script is NOT proof of a running task.
+    // Re-query the active UI immediately before notifying.
+    const fresh = await queryTab(tab);
+    if (!fresh || fresh.state !== rec.state || fresh.confirmed !== true ||
+      fresh.startedAt !== rec.startedAt || fresh.mode !== rec.mode) continue;
+    await showNotice('long', tab.id, rec.startedAt, `${minutes}分`);
+  }
   }
 }
 async function updateLongAlarm() {
@@ -182,7 +201,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   return false;
 });
 function onNoticeClick(notificationId) {
-  const match = /^tabpulse-(completed|attention|long)-(\d+)-(\d+)$/.exec(notificationId);
+  const match = /^tabpulse-(completed|attention|long|error|timeout)-(\d+)-(\d+)$/.exec(notificationId);
   if (!match) return;
   const id = Number(match[2]);
   void chrome.tabs.get(id).then(async (tab) => {
@@ -209,13 +228,13 @@ chrome.tabs.onUpdated.addListener((id, changes) => {
 });
 chrome.tabs.onReplaced.addListener(() => { void refreshTabs(); });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && ['notifyCompleted', 'notifyAttention', 'notifyLongRunning', 'longRunningMinutes'].some(k => changes[k])) {
+  if (area === 'local' && ['notifyCompleted', 'notifyAttention', 'notifyLongRunning', 'longRunningMinutes', 'chatLongMinutes', 'workLongMinutes', 'notifyFailure'].some(k => changes[k])) {
     void updateLongAlarm();
   }
 });
 chrome.permissions.onRemoved.addListener((permissions) => {
   if (permissions.permissions?.includes('notifications')) {
-    void chrome.storage.local.set({notifyCompleted:false, notifyAttention:false, notifyLongRunning:false});
+    void chrome.storage.local.set({notifyCompleted:false, notifyAttention:false, notifyLongRunning:false, notifyFailure:false});
     void updateLongAlarm();
   }
 });

@@ -101,3 +101,9 @@ footer{font-size:10px;color:#7e8fa1;line-height:1.5;margin-top:17px}
 .codex-meta strong{color:#e6edf3;font-variant-numeric:tabular-nums}
 .codex-section[data-freshness="stale"] .codex-usage-top span{color:#ffcc85}
 .codex-usage-row progress[hidden]{display:none}
+
+/* Explicit failure states remain separate from long-running advisory states. */
+.state-icon.error,.state-icon.timeout{background:#7f252a;color:#fff}
+.tab-indicator.error,.tab-indicator.timeout{background:#b82f39;color:#fff}
+.recovery-note{background:#40252a;color:#ffe5e4;border:1px solid #ab414a;padding:11px;border-radius:9px;font-size:11px;line-height:1.6;margin:9px 0}
+.recovery-note[hidden]{display:none}

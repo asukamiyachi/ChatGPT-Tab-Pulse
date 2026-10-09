@@ -14,9 +14,17 @@
     return "chat";
   }
 
+  // Detect only recognized live UI errors; never infer a timeout from elapsed time.
+  const ERROR_KINDS = Object.freeze(['timeout', 'network', 'generation']);
+  function failureState(kind) {
+    return kind === 'timeout' ? 'timeout' : ERROR_KINDS.includes(kind) ? 'error' : null;
+  }
+
   function stateFor(signals) {
     if (!signals.enabled) return "disabled";
     const mode = modeFor(signals);
+    const failure = failureState(signals.errorKind);
+    if (failure) return failure;
     if (mode === "work" && signals.attentionVisible) return "attention";
     if (signals.stopVisible) return mode === "work" ? "working" : "thinking";
     if (mode === "work" && signals.workRunningVisible) return "working";
@@ -31,6 +39,8 @@
   function reasonFor(signals, state) {
     switch (state) {
       case "disabled": return "拡張機能がオフです";
+      case "timeout": return "現在の処理でタイムアウト表示を検出しました";
+      case "error": return signals.errorKind === 'network' ? "現在の処理で通信エラー表示を検出しました" : "現在の処理で生成・作業エラー表示を検出しました";
       case "thinking": return signals.stopVisible ? "応答停止ボタンを検出" : "メッセージ送信を検出（暫定）";
       case "working": return signals.stopVisible ? "停止ボタンを検出" : "Workの進行中表示を検出";
       case "attention": return "Workの確認・承認待ち表示を検出";
@@ -39,7 +49,7 @@
     }
   }
 
-  const api = Object.freeze({ MODES, modeFor, stateFor, reasonFor });
+  const api = Object.freeze({ MODES, ERROR_KINDS, failureState, modeFor, stateFor, reasonFor });
   root.ChatGPTStatusDetector = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

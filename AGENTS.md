@@ -12,3 +12,6 @@ This project is a local-only Chrome Manifest V3 extension for chatgpt.com and ch
 
 - Codex readToken is sensitive: keep it only in `chrome.storage.session` (trusted extension contexts), never in local/sync storage, URL, page messages, logs, or tests with real values.
 - Do not modify `codex-usage-manager` without a demonstrated backend incompatibility. Never request browser cookies or Codex auth material.
+
+- v0.6 failure detection must use live system banners belonging to a verified current run; never classify error words in conversation messages as errors. Long-running is advisory, not proof of timeout.
+- Never automatically retry, reload, approve, or submit any ChatGPT/Work action. Keep failure notices opt-in and test duplicates, expired evidence, and false positives.

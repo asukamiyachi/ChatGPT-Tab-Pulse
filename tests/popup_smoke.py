@@ -37,7 +37,7 @@ with sync_playwright() as p:
         html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.S)
         html = re.sub(r'<link rel="stylesheet"[^>]*>', '', html)
         # Inline local icons in the mock only; production popup uses packaged extension URLs.
-        for icon in ['idle','thinking','working','attention','unknown']:
+        for icon in ['idle','thinking','working','attention','unknown','error','timeout']:
             png = base64.b64encode((ROOT/'icons'/f'{icon}-32.png').read_bytes()).decode('ascii')
             html = html.replace(f'icons/{icon}-32.png',f'data:image/png;base64,{png}')
         page.set_content(html)
@@ -54,6 +54,10 @@ with sync_playwright() as p:
         assert page.locator('#tab-list button').count() == 4
         assert '経過' in page.locator('#tab-list .tab-elapsed').first.inner_text()
         print('PASS: elapsed runtime visible in active tab row')
+        page.evaluate("window.chrome.tabs.sendMessage = async () => ({state:'timeout', reason:'処理のタイムアウト表示を検出しました',override:'auto'})")
+        page.wait_for_function("document.querySelector('#state-label').textContent.includes('タイムアウト')",timeout=5500)
+        assert page.locator('#recovery-note').is_visible()
+        print('PASS: failure UI includes manual recovery guidance')
         assert page.locator('#tab-list .tab-item.current').count() == 1
         print('PASS: tab rows and current tab marker')
         assert page.locator('#tab-list img').count() == 0

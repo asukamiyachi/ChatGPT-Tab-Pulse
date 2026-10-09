@@ -24,6 +24,7 @@ with sync_playwright() as p:
           };
         }''')
         page.add_script_tag(path=str(ROOT/'src'/'detector.js'))
+        page.add_script_tag(path=str(ROOT/'src'/'error-detection.js'))
         page.add_script_tag(path=str(ROOT/'src'/'content.js'))
         page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('idle-32.png')", timeout=5000)
         print('PASS: Chat idle favicon')
@@ -58,6 +59,33 @@ with sync_playwright() as p:
         }""")
         page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('attention-32.png')")
         print('PASS: Work approval attention favicon')
+        # Old chat text cannot cause a timeout; only live alert UI is eligible.
+        page.evaluate("""() => {
+          __testMessageListener({type:'SET_MODE',mode:'chat'}, {}, () => {});
+          document.querySelector('[role=dialog]')?.remove();
+          const form = document.querySelector('main form');
+          const b=document.createElement('button');b.dataset.testid='stop-button';b.textContent='Stop';b.type='button';form.appendChild(b);
+          const old=document.createElement('p');old.textContent='Request timed out';old.id='old-message';document.querySelector('main').appendChild(old);
+        }""")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('thinking-32.png')")
+        page.wait_for_timeout(1300)
+        assert page.evaluate("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('thinking-32.png')")
+        print('PASS: old message text cannot trigger error')
+        # Do not count a short-lived toast as a true failure.
+        page.evaluate("""() => {const x=document.createElement('div');x.id='test-alert';x.setAttribute('role','alert');x.textContent='Request timed out';document.querySelector('main').appendChild(x)}""")
+        page.wait_for_timeout(300)
+        page.evaluate("document.querySelector('#test-alert').remove()")
+        page.wait_for_timeout(1250)
+        assert page.evaluate("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('thinking-32.png')")
+        print('PASS: transient timeout alert ignored')
+        page.evaluate("""() => {const x=document.createElement('div');x.id='test-alert';x.setAttribute('role','alert');x.textContent='Request timed out';document.querySelector('main').appendChild(x)}""")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('timeout-32.png')",timeout=4500)
+        status = page.evaluate("""() => {let result;__testMessageListener({type:'GET_STATUS'}, {}, x=>result=x);return result;}""")
+        assert status['errorKind']=='timeout' and status['failureRunStartedAt']
+        print('PASS: sustained current run timeout alert confirmed')
+        page.evaluate("document.querySelector('#test-alert').remove()")
+        page.evaluate("document.querySelector('[data-testid=stop-button]')?.remove()")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('idle-32.png')",timeout=5000)
         page.evaluate("() => __testStorageListener({enabled:{newValue:false}},'local')")
         page.wait_for_function("!document.querySelector('#chatgpt-tab-pulse-icon')")
         assert page.locator('link[href="/original.ico"]').get_attribute('rel') == 'icon'

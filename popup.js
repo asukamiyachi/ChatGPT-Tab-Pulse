@@ -10,6 +10,8 @@
     attention: ['Work 確認待ち', '!'],
     idle: ['待機中', '✓'],
     unknown: ['状態不明', '?'],
+    error: ['処理エラー（要確認）', '×'],
+    timeout: ['タイムアウト（要確認）', '⌛'],
     disabled: ['オフ', '−']
   };
   let tabId = null;
@@ -22,6 +24,11 @@
     const [label, symbol] = STATE[status];
     $('state-label').textContent = label;
     $('state-reason').textContent = data?.reason || '状態を確認できません';
+    const failure = status === 'timeout' || status === 'error';
+    $('recovery-note').hidden = !failure;
+    $('recovery-note').textContent = status === 'timeout' ?
+      'タイムアウトの表示を検出しました。タブを確認し、実際に処理が停止している場合のみ再試行してください。Workでは先に作業履歴を確認してください。' :
+      '処理エラーの表示を検出しました。通信状態と作業履歴を確認し、必要な場合のみ手動で再試行してください。';
     $('state-icon').className = `state-icon ${status}`;
     $('state-icon').textContent = symbol;
     if (document.activeElement !== $('mode')) $('mode').value = data?.override || 'auto';
@@ -161,9 +168,11 @@
   }
   async function readAlertSettings() {
     const settings = alerts.settingsFor(await chrome.storage.local.get(alerts.DEFAULTS));
-    for (const key of ['notifyCompleted', 'notifyAttention', 'notifyLongRunning']) $(key).checked = settings[key];
-    $('longRunningMinutes').value = String(settings.longRunningMinutes);
-    $('longRunningMinutes').disabled = !settings.notifyLongRunning;
+    for (const key of ['notifyCompleted', 'notifyAttention', 'notifyLongRunning', 'notifyFailure']) $(key).checked = settings[key];
+    $('chatLongMinutes').value = String(settings.chatLongMinutes);
+    $('workLongMinutes').value = String(settings.workLongMinutes);
+    $('chatLongMinutes').disabled = !settings.notifyLongRunning;
+    $('workLongMinutes').disabled = !settings.notifyLongRunning;
   }
   async function changeNotice(key) {
     const enabled = $(key).checked;
@@ -180,7 +189,7 @@
       await chrome.storage.local.set({[key]: enabled});
       if (!enabled) {
         const saved = alerts.settingsFor(await chrome.storage.local.get(alerts.DEFAULTS));
-        if (!saved.notifyCompleted && !saved.notifyAttention && !saved.notifyLongRunning) {
+        if (!saved.notifyCompleted && !saved.notifyAttention && !saved.notifyLongRunning && !saved.notifyFailure) {
           await chrome.permissions.remove({permissions: ['notifications']});
         }
       }
@@ -191,19 +200,21 @@
       await readAlertSettings();
     }
   }
-  for (const key of ['notifyCompleted','notifyAttention','notifyLongRunning']) {
+  for (const key of ['notifyCompleted','notifyAttention','notifyLongRunning','notifyFailure']) {
     $(key).addEventListener('change', () => { void changeNotice(key); });
   }
-  $('longRunningMinutes').addEventListener('change', async () => {
-    await chrome.storage.local.set({longRunningMinutes: Number($('longRunningMinutes').value)});
-  });
+  for (const key of ['chatLongMinutes', 'workLongMinutes']) {
+    $(key).addEventListener('change', async () => {
+      await chrome.storage.local.set({[key]: Number($(key).value)});
+    });
+  }
   chrome.storage.local.get({ enabled: true }).then((settings) => {
     $('enabled').checked = settings.enabled !== false;
   });
   void readAlertSettings();
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes.enabled) $('enabled').checked = changes.enabled.newValue !== false;
-    if (area === 'local' && ['notifyCompleted','notifyAttention','notifyLongRunning','longRunningMinutes'].some(k => changes[k])) void readAlertSettings();
+    if (area === 'local' && ['notifyCompleted','notifyAttention','notifyLongRunning','chatLongMinutes','workLongMinutes','notifyFailure'].some(k => changes[k])) void readAlertSettings();
   });
   refresh();
   setInterval(refresh, 3000);
