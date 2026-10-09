@@ -169,7 +169,6 @@ async function checkLongRunning() {
       fresh.startedAt !== rec.startedAt || fresh.mode !== rec.mode) continue;
     await showNotice('long', tab.id, rec.startedAt, `${minutes}分`);
   }
-  }
 }
 async function updateLongAlarm() {
   const settings = policy.settingsFor(await chrome.storage.local.get(policy.DEFAULTS));
