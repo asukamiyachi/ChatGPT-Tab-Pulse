@@ -248,3 +248,40 @@ test('long running does not alert without live confirmation',async()=>{
   await sleep(70);
   assert.equal(m.shown.length,0);
 });
+
+
+test('late timeout after idle sends exactly one notice for same run',async()=>{
+  const m=setup();
+  m.settings.notifyFailure=true;
+  await m.overview();
+  const run=Date.now()-7000;
+  m.broadcast(2,'thinking','chat',{confirmed:true,startedAt:run});
+  await sleep(40);
+  m.broadcast(2,'idle','chat',{recentRunStartedAt:run,recentRunObservedAt:Date.now()-1700});
+  await sleep(40);
+  m.broadcast(2,'timeout','chat',{errorKind:'timeout',failureRunStartedAt:run});
+  await sleep(60);
+  assert.equal(m.shown.length,1);
+  assert.match(m.shown[0].data.title,/タイムアウト/);
+  m.broadcast(2,'timeout','chat',{errorKind:'timeout',failureRunStartedAt:run});
+  await sleep(50);
+  assert.equal(m.shown.length,1);
+});
+
+test('late timeout from expired or different run cannot notify',async()=>{
+  const m=setup();
+  m.settings.notifyFailure=true;
+  await m.overview();
+  const run=Date.now()-120000;
+  m.broadcast(2,'idle','chat',{recentRunStartedAt:run,recentRunObservedAt:Date.now()-95000});
+  await sleep(40);
+  m.broadcast(2,'timeout','chat',{errorKind:'timeout',failureRunStartedAt:run});
+  await sleep(45);
+  assert.equal(m.shown.length,0);
+  const newRun=Date.now()-4000;
+  m.broadcast(2,'idle','chat',{recentRunStartedAt:newRun,recentRunObservedAt:Date.now()-500});
+  await sleep(40);
+  m.broadcast(2,'timeout','chat',{errorKind:'timeout',failureRunStartedAt:run});
+  await sleep(45);
+  assert.equal(m.shown.length,0);
+});

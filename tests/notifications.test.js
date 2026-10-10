@@ -52,6 +52,21 @@ test('failure requires current verified run and matching run id',()=>{
   assert.equal(alerts.shouldNotifyCompletion(failure,completed,now),false);
 });
 
+test('late failure after idle requires the same recently verified run',()=>{
+  const observed=now-2000;
+  const before={state:'idle',mode:'chat',confirmed:false,recentRunStartedAt:start,recentRunObservedAt:observed};
+  const after={state:'timeout',mode:'chat',errorKind:'timeout',failureRunStartedAt:start};
+  assert.equal(alerts.shouldNotifyFailure(before,after,now),true);
+  assert.equal(alerts.shouldNotifyFailure({...before,state:'unknown'},after,now),true);
+  assert.equal(alerts.shouldNotifyFailure({...before,recentRunObservedAt:now-91000},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,recentRunStartedAt:start+1},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,recentRunObservedAt:start-1},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,mode:'work'},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,state:'disabled'},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,state:'error'},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,recentRunObservedAt:null},after,now),false);
+});
+
 test('mode thresholds default 5/20 and notifications are opt-in',()=>{
   assert.equal(alerts.settingsFor({}).chatLongMinutes,5);
   assert.equal(alerts.settingsFor({}).workLongMinutes,20);

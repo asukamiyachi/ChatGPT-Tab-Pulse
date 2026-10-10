@@ -36,10 +36,19 @@
       before.state !== 'attention' && validTimestamp(after.attentionSince, now);
   }
   function shouldNotifyFailure(before, after, now = Date.now()) {
-    return !!before && !!after && running(before.state) && before.confirmed === true &&
-      (after.state === 'timeout' || after.state === 'error') &&
-      before.mode === after.mode && validTimestamp(before.startedAt, now) &&
-      after.failureRunStartedAt === before.startedAt &&
+    if (!before || !after || !['timeout', 'error'].includes(after.state) || before.mode !== after.mode ||
+      !validTimestamp(after.failureRunStartedAt, now)) return false;
+    const directlyRunning = running(before.state) && before.confirmed === true &&
+      before.startedAt === after.failureRunStartedAt;
+    // After the Stop button disappears, an error may arrive after the idle debounce.
+    // Accept only the same previously verified run with recent evidence; never an old tab state.
+    const recentVerified = ['idle', 'unknown'].includes(before.state) &&
+      validTimestamp(before.recentRunStartedAt, now) &&
+      before.recentRunStartedAt === after.failureRunStartedAt &&
+      validTimestamp(before.recentRunObservedAt, now) &&
+      before.recentRunObservedAt >= before.recentRunStartedAt &&
+      now - before.recentRunObservedAt <= 90000;
+    return (directlyRunning || recentVerified) &&
       (after.state === 'timeout' ? after.errorKind === 'timeout' : ['network', 'generation'].includes(after.errorKind));
   }
   function shouldNotifyLong(record, now, minutes) {

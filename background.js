@@ -44,7 +44,9 @@ function recordFrom(payload, previous = null) {
     completionConfirmed: payload?.completionConfirmed === true,
     completedRunStartedAt: policy.validTimestamp(payload?.completedRunStartedAt, now) ? payload.completedRunStartedAt : null,
     errorKind: payload?.errorKind === 'timeout' || payload?.errorKind === 'network' || payload?.errorKind === 'generation' ? payload.errorKind : null,
-    failureRunStartedAt: policy.validTimestamp(payload?.failureRunStartedAt, now) ? payload.failureRunStartedAt : null
+    failureRunStartedAt: policy.validTimestamp(payload?.failureRunStartedAt, now) ? payload.failureRunStartedAt : null,
+    recentRunStartedAt: policy.validTimestamp(payload?.recentRunStartedAt, now) ? payload.recentRunStartedAt : null,
+    recentRunObservedAt: policy.validTimestamp(payload?.recentRunObservedAt, now) ? payload.recentRunObservedAt : null
   };
 }
 function tabRecord(tab, payload) {

@@ -27,7 +27,14 @@
   let pendingFailureSince = 0;
   let pendingFailureKind = null;
   let lastRunningEvidenceAt = 0;
+  // A verified run remains eligible for a late error after the Stop control vanishes.
+  let recentRunStartedAt = null;
+  let recentRunMode = null;
+  // A confirmed failure remains visible while its original banner is still present.
+  let latchedFailure = null;
+  let previousStrongEvidence = false;
   let lastErrorNode = null;
+  let lastErrorKind = null;
   let lastErrorSeenAt = 0;
   let attentionSince = null;
   const STABLE_IDLE_MS = 1400;
@@ -216,7 +223,12 @@
         pendingIdleSince = pendingAttentionSince = pendingFailureSince = 0;
         pendingFailureKind = null;
         lastRunningEvidenceAt = 0;
+        recentRunStartedAt = null;
+        recentRunMode = null;
+        latchedFailure = null;
+        previousStrongEvidence = false;
         lastErrorNode = null;
+        lastErrorKind = null;
         lastErrorSeenAt = 0;
       }
       lastPath = location.pathname;
@@ -228,16 +240,33 @@
     }
     const mode = detector.modeFor(signals);
     const now = Date.now();
-    if (signals.errorNode !== lastErrorNode) {
+    if (signals.errorNode !== lastErrorNode || signals.errorKind !== lastErrorKind) {
       lastErrorNode = signals.errorNode;
+      lastErrorKind = signals.errorKind;
       lastErrorSeenAt = lastErrorNode ? now : 0;
     }
-    const priorVerifiedRun = current?.confirmed === true && ['thinking', 'working'].includes(current.state) && current.mode === mode;
-    const priorRecentRun = current?.state === 'error' || current?.state === 'timeout';
-    const inFailureWindow = (priorVerifiedRun || priorRecentRun) && now - lastRunningEvidenceAt <= FAILURE_GRACE_MS;
-    const activeRunStart = priorVerifiedRun ? current.startedAt : priorRecentRun ? current.failureRunStartedAt : null;
-    // A toast already present before the run started is not evidence about this run.
-    if (!inFailureWindow || !activeRunStart || lastErrorSeenAt < activeRunStart - 50) signals.errorKind = null;
+    const strongEvidenceNow = signals.stopVisible || (mode === 'work' && signals.workRunningVisible);
+    // A fresh run may start without a form submit (Work). A new rising edge
+    // invalidates an old failure only after the old Stop control disappeared.
+    if (strongEvidenceNow && !previousStrongEvidence &&
+        (!current || ['idle', 'unknown', 'error', 'timeout'].includes(current.state))) {
+      recentRunStartedAt = null;
+      recentRunMode = null;
+      latchedFailure = null;
+      lastRunningEvidenceAt = 0;
+      pendingFailureKind = null;
+    }
+    previousStrongEvidence = strongEvidenceNow;
+    const sameRecentRun = recentRunStartedAt && recentRunMode === mode;
+    const withinGrace = sameRecentRun && now - lastRunningEvidenceAt <= FAILURE_GRACE_MS;
+    const sameVisibleFailure = latchedFailure && sameRecentRun &&
+      latchedFailure.node === signals.errorNode && latchedFailure.kind === signals.errorKind &&
+      latchedFailure.runStartedAt === recentRunStartedAt;
+    // A pre-existing banner, unrelated conversation, or expired unconfirmed run is not evidence.
+    if (!(sameVisibleFailure || (withinGrace && lastErrorSeenAt > recentRunStartedAt + 50))) {
+      signals.errorKind = null;
+    }
+    if (!sameVisibleFailure) latchedFailure = null;
     const candidate = detector.stateFor(signals);
     const previous = current;
     let state = candidate;
@@ -286,7 +315,11 @@
       if (now - pendingFailureSince < STABLE_FAILURE_MS) {
         state = wasRunning ? previous.state : 'unknown';
       } else {
-        failureRunStartedAt = wasRunning ? previous.startedAt : previous.failureRunStartedAt;
+        failureRunStartedAt = recentRunStartedAt;
+        latchedFailure = {
+          node: signals.errorNode, kind: signals.errorKind,
+          runStartedAt: recentRunStartedAt
+        };
       }
     } else {
       pendingFailureKind = null;
@@ -299,24 +332,38 @@
     const sameRun = isRunning && wasRunning && previous.mode === mode;
     const startedAt = isRunning ? (sameRun ? previous.startedAt : now) : null;
     const confirmed = isRunning && (strongEvidence || sameRun && previous.confirmed === true);
-    if (confirmed && strongEvidence) lastRunningEvidenceAt = now;
+    if (confirmed && strongEvidence) {
+      recentRunStartedAt = startedAt;
+      recentRunMode = mode;
+      lastRunningEvidenceAt = now;
+      latchedFailure = null;
+    }
+    if (state === 'disabled') {
+      recentRunStartedAt = null;
+      recentRunMode = null;
+      latchedFailure = null;
+    }
     current = {
       state, mode, override, reason: detector.reasonFor(signals, state), enabled,
       startedAt, confirmed, completedRunStartedAt, completionConfirmed, attentionSince,
       errorKind: state === 'error' || state === 'timeout' ? signals.errorKind : null,
-      failureRunStartedAt
+      failureRunStartedAt,
+      recentRunStartedAt: recentRunMode === mode ? recentRunStartedAt : null,
+      recentRunObservedAt: recentRunMode === mode ? lastRunningEvidenceAt : null
     };
     if (state === 'disabled') restoreIcons();
     else installIcon(state);
     // Broadcast only state transitions, not the changing elapsed clock.
     // The single-use completion evidence is not included in repeated GET_STATUS results.
-    const signature = JSON.stringify([state, mode, override, startedAt, confirmed, completedRunStartedAt, attentionSince, current.errorKind, failureRunStartedAt]);
+    const signature = JSON.stringify([state, mode, override, startedAt, confirmed, completedRunStartedAt, attentionSince, current.errorKind, failureRunStartedAt, current.recentRunStartedAt]);
     if (signature !== lastBroadcast) {
       lastBroadcast = signature;
       try {
         chrome.runtime.sendMessage({ type: 'TAB_STATUS_UPDATE', state, mode, override,
           startedAt, confirmed, completedRunStartedAt, completionConfirmed, attentionSince,
-          errorKind: current.errorKind, failureRunStartedAt })
+          errorKind: current.errorKind, failureRunStartedAt,
+          recentRunStartedAt: current.recentRunStartedAt,
+          recentRunObservedAt: current.recentRunObservedAt })
           .catch(() => { /* Worker might be restarting. */ });
       } catch (_) { /* Extension might be reloaded. */ }
     }
@@ -332,6 +379,12 @@
   // The state self-expires; a failed send cannot leave an endless "thinking" icon.
   document.addEventListener('submit', (event) => {
     if (event.target.closest('main') && event.target.matches('form')) {
+      // A new chat submission invalidates the previous run, even while an old alert remains.
+      recentRunStartedAt = null;
+      recentRunMode = null;
+      latchedFailure = null;
+      lastRunningEvidenceAt = 0;
+      pendingFailureKind = null;
       optimisticUntil = Date.now() + 3500;
       schedule();
     }
@@ -356,7 +409,12 @@
       pendingIdleSince = pendingAttentionSince = pendingFailureSince = 0;
       pendingFailureKind = null;
       lastRunningEvidenceAt = 0;
+      recentRunStartedAt = null;
+      recentRunMode = null;
+      latchedFailure = null;
+      previousStrongEvidence = false;
       lastErrorNode = null;
+      lastErrorKind = null;
       lastErrorSeenAt = 0;
       optimisticUntil = 0;
       evaluate();
