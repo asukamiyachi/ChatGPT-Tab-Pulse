@@ -20,7 +20,7 @@ Chromeで開いたChatGPTの通常Chat・Workについて、**ファビコン・
 
 **v0.4で追加した機能：**
 
-- **完了通知**：実際の停止ボタンなどの強い「処理中」証拠があり、同じタブ・同じ処理の完了状態が約1.4秒安定した場合に限る。送信直後の暫定推論だけでは通知しません。
+- **完了通知**：実際の停止ボタンなどの強い「処理中」証拠があり、同じタブ・同じ処理の待機状態が約5秒続き、遅延エラーの表示がない場合に限る（暫定的な判定であり、完了の保証ではありません）。送信直後の暫定推論だけでは通知しません。
 - **Work確認待ち通知**：承認・入力待ちと判定された状態が約0.85秒安定したら通知。
 - **実行時間**：各タブの「確証のある実行中」の経過時間を一覧に1秒単位で表示。
 - **通知クリックで戻る**：該当ChatGPTタブとそのChromeウィンドウを前面へ。
@@ -81,6 +81,7 @@ Chromeで開いたChatGPTの通常Chat・Workについて、**ファビコン・
 node --test tests/*.test.js
 for f in background.js popup.js src/*.js; do node --check "$f"; done
 python3 tests/browser_smoke.py
+python3 tests/failure_regression.py
 python3 tests/popup_smoke.py
 python3 tests/codex-popup-smoke.py
 ```
