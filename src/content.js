@@ -29,6 +29,7 @@
   let pendingFailureNode = null;
   let completionNotifiedRun = null;
   let failedRun = null;
+  let cancelledRun = null;
   let lastRunningEvidenceAt = 0;
   // A verified run remains eligible for a late error after the Stop control vanishes.
   let recentRunStartedAt = null;
@@ -39,6 +40,7 @@
   // Track the FIRST appearance of each system banner, including when React
   // changes a banner's text in place. The DOM itself is never persisted.
   const errorObservations = new WeakMap();
+  const completionObservations = new WeakMap();
   let attentionSince = null;
   const STABLE_IDLE_MS = 1400;
   const STABLE_ATTENTION_MS = 850;
@@ -119,7 +121,7 @@
     // Limit to live status elements; do not scan previous messages/conversation text.
     const selectors = '[role="status"], [role="alert"], [data-work-status], [data-task-status], [data-testid*="task-status"], [data-testid*="work-status"]';
     for (const el of main.querySelectorAll(selectors)) {
-      if (!visible(el)) continue;
+      if (!visible(el) || el.closest(NON_TASK_ALERT_CONTEXT)) continue;
       const direct = el.getAttribute('data-work-status') || el.getAttribute('data-task-status');
       const content = normalized(direct || el.textContent);
       if (content.length <= 100 && pattern.test(content)) return true;
@@ -127,12 +129,40 @@
     return false;
   }
 
+  const NON_TASK_ALERT_CONTEXT = [
+    '[role="dialog"]', '[role="alertdialog"]', 'aside', 'nav',
+    '[data-testid*="settings"]', '[data-testid*="preferences"]',
+    '[data-testid*="account"]', '[data-testid*="profile"]',
+    '[data-testid*="notification"]', '[data-state="open"][role="menu"]',
+    '[aria-label*="Settings"]', '[aria-label*="設定"]',
+    '[data-message-author-role]', '[data-testid^="conversation-turn-"]'
+  ].join(',');
+
+  function completionEvidenceAt(main, now = Date.now()) {
+    let newest = 0;
+    const selector = '[role="status"], [data-work-status], [data-task-status], [data-testid*="task-status"], [data-testid*="work-status"]';
+    for (const node of main.querySelectorAll(selector)) {
+      if (!visible(node) || node.closest(NON_TASK_ALERT_CONTEXT)) continue;
+      const raw = node.getAttribute('data-work-status') || node.getAttribute('data-task-status') || node.textContent;
+      const fingerprint = normalized(raw);
+      if (fingerprint.length > 100 || !DONE_TEXT.test(fingerprint)) continue;
+      let observed = completionObservations.get(node);
+      if (!observed || observed.fingerprint !== fingerprint) {
+        observed = {fingerprint, since: now};
+        completionObservations.set(node, observed);
+      }
+      newest = Math.max(newest, observed.since);
+    }
+    return newest;
+  }
+
   function currentErrors(main, now = Date.now()) {
-    // Inspect only dedicated system UI; never search assistant responses.
+    // An alert must belong to the live conversation/task area, not a settings
+    // dialog, toast in a navigation panel, or historical conversation content.
     const selectors = '[role="alert"], [role="alertdialog"], [data-testid="error-message"], [data-testid="response-error"], [data-testid="task-error"], [data-task-status], [data-work-status]';
     const candidates = [];
     for (const node of main.querySelectorAll(selectors)) {
-      if (!visible(node)) continue;
+      if (!visible(node) || node.closest(NON_TASK_ALERT_CONTEXT)) continue;
       const raw = node.getAttribute('data-task-status') || node.getAttribute('data-work-status') || node.textContent;
       const kind = errors.classify(raw);
       if (!kind) continue;
@@ -170,6 +200,7 @@
     ) || anyVisible('form[data-chatgpt-composer], [data-testid="composer"]', main);
     const workTaskMarker = !!main.querySelector('[data-work-status], [data-task-status], [data-testid^="work-task-"], [data-testid^="agent-task-"]');
     const liveErrors = currentErrors(main);
+    const doneObservedAt = completionEvidenceAt(main);
     return {
       enabled, override, pathname: path,
       workModeSelected: selectedWorkMode(main),
@@ -179,6 +210,10 @@
       optimisticSend: optimisticUntil > Date.now(),
       workRunningVisible: statusVisible(main, ACTIVE_TEXT),
       workDoneVisible: statusVisible(main, DONE_TEXT),
+      // Completion requires positive evidence. Composer reappearance is not
+      // enough: it happens after a user cancels a response as well.
+      chatDoneVisible: statusVisible(main, DONE_TEXT),
+      doneObservedAt,
       attentionVisible: statusVisible(main, ATTENTION_TEXT) || attentionControlVisible(document),
       errorCandidates: liveErrors,
       errorKind: null,
@@ -238,6 +273,7 @@
         pendingFailureNode = null;
         completionNotifiedRun = null;
         failedRun = null;
+        cancelledRun = null;
         lastRunningEvidenceAt = 0;
         recentRunStartedAt = null;
         recentRunMode = null;
@@ -265,6 +301,7 @@
       pendingIdleSince = 0;
       completionNotifiedRun = null;
       failedRun = null;
+      cancelledRun = null;
       lastRunningEvidenceAt = 0;
     }
     previousStrongEvidence = strongEvidenceNow;
@@ -277,7 +314,7 @@
       // periodic observer last noticed it. Otherwise timer alignment could
       // consume the entire grace period before React starts its redraw.
       const originalPresent = candidates.some(e => e.node === latchedFailure.node &&
-        e.kind === latchedFailure.kind && e.fingerprint === latchedFailure.fingerprint);
+        e.kind === latchedFailure.kind);
       if (!originalPresent && latchedFailure.missingSinceMono === null) {
         latchedFailure.missingSinceMono = performance.now();
       }
@@ -285,9 +322,11 @@
         performance.now() - latchedFailure.missingSinceMono <= FAILURE_REDRAW_GAP_MS;
       // A prior-run banner is never eligible, even if its text is identical.
       matchedError = candidates.find(e => e.kind === latchedFailure.kind &&
-        e.fingerprint === latchedFailure.fingerprint &&
         (e.node === latchedFailure.node ||
-          (withinRedraw && e.since > recentRunStartedAt))) || null;
+          (withinRedraw && e.since > recentRunStartedAt &&
+           // A replacement may alter the wording but must still be associated
+           // with the same task and error type, never a historical banner.
+           e.since >= latchedFailure.firstSeenAt))) || null;
       if (matchedError) latchedFailure.missingSinceMono = null;
     }
     if (!matchedError && withinGrace && !latchedFailure) {
@@ -321,8 +360,10 @@
     // appear after Stop disappears. Keep the run ID while idle and postpone
     // the opt-in completion notice until the UI has settled without errors.
     const eligibleForCompletion = candidate === 'idle' && sameRecentRun &&
-      !failedRun && completionNotifiedRun !== recentRunStartedAt &&
-      (mode === 'chat' ? signals.composerVisible : signals.workDoneVisible);
+      !failedRun && cancelledRun !== recentRunStartedAt &&
+      completionNotifiedRun !== recentRunStartedAt &&
+      (mode === 'chat' ? signals.chatDoneVisible : signals.workDoneVisible) &&
+      signals.doneObservedAt >= recentRunStartedAt;
     if (eligibleForCompletion &&
         (wasRunning || previous?.state === 'idle' && previous.mode === mode)) {
       if (!pendingIdleSince) {
@@ -379,6 +420,7 @@
           latchedFailure = {
             node: matchedError.node, kind: matchedError.kind,
             fingerprint: matchedError.fingerprint, missingSinceMono: null,
+            firstSeenAt: matchedError.since,
             runStartedAt: recentRunStartedAt
           };
           failedRun = recentRunStartedAt;
@@ -408,6 +450,7 @@
       recentRunMode = null;
       latchedFailure = null;
       failedRun = null;
+      cancelledRun = null;
       pendingIdleSince = 0;
     }
     current = {
@@ -442,6 +485,19 @@
     setTimeout(evaluate, 180);
   }
 
+  // A user-initiated Stop/Cancel is NOT successful completion. Both mouse and
+  // keyboard button activation dispatch click; capture before the UI removes it.
+  document.addEventListener('click', (event) => {
+    const button = event.target instanceof Element ? event.target.closest('button') : null;
+    if (!button || !button.closest('main') || !visible(button)) return;
+    const stopButton = button.matches(STOP_SELECTORS) ||
+      [button.getAttribute('aria-label'), button.title, button.textContent]
+        .some(v => STOP_TEXT.test(normalized(v)));
+    if (!stopButton || !recentRunStartedAt || !current?.confirmed) return;
+    cancelledRun = recentRunStartedAt;
+    pendingIdleSince = 0;
+  }, true);
+
   // Track submit events for the short gap before the stop button appears.
   // The state self-expires; a failed send cannot leave an endless "thinking" icon.
   document.addEventListener('submit', (event) => {
@@ -456,6 +512,7 @@
       pendingIdleSince = 0;
       completionNotifiedRun = null;
       failedRun = null;
+      cancelledRun = null;
       optimisticUntil = Date.now() + 3500;
       schedule();
     }
@@ -482,6 +539,7 @@
       pendingFailureNode = null;
       completionNotifiedRun = null;
       failedRun = null;
+      cancelledRun = null;
       lastRunningEvidenceAt = 0;
       recentRunStartedAt = null;
       recentRunMode = null;

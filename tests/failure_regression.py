@@ -97,6 +97,8 @@ with sync_playwright() as p:
         stop(page,True)
         run=status(page)['startedAt']
         stop(page,False)
+        page.evaluate("""() => {const x=document.createElement('div');x.setAttribute('role','status');
+          x.textContent='Completed';document.querySelector('main').appendChild(x)}""")
         page.wait_for_function("updates.some(x=>x.completionConfirmed)",timeout=8000)
         completes=[u for u in page.evaluate('updates') if u.get('completionConfirmed')]
         assert len(completes)==1 and completes[0]['completedRunStartedAt']==run, completes
