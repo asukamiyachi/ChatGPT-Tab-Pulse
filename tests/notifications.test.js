@@ -73,3 +73,13 @@ test('mode thresholds default 5/20 and notifications are opt-in',()=>{
   assert.equal(alerts.settingsFor({}).notifyFailure,false);
   assert.equal(alerts.settingsFor({notifyFailure:true,chatLongMinutes:15,workLongMinutes:45}).notifyFailure,true);
 });
+
+
+test('settled idle completion requires same previously confirmed run',()=>{
+  const idle={state:'idle',mode:'chat',recentRunStartedAt:start,recentRunObservedAt:now-6000};
+  assert.equal(alerts.shouldNotifyCompletion(idle,completed,now),true);
+  assert.equal(alerts.shouldNotifyCompletion({...idle,recentRunStartedAt:start+3},completed,now),false);
+  assert.equal(alerts.shouldNotifyCompletion({...idle,recentRunObservedAt:now-91000},completed,now),false);
+  assert.equal(alerts.shouldNotifyCompletion({...idle,state:'timeout'},completed,now),false);
+  assert.equal(alerts.shouldNotifyCompletion({...idle,recentRunObservedAt:null},completed,now),false);
+});

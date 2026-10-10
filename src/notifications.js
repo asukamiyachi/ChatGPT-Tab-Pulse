@@ -26,10 +26,18 @@
     };
   }
   function shouldNotifyCompletion(before, after, now = Date.now()) {
-    return !!before && !!after && running(before.state) && before.confirmed === true &&
-      after.state === 'idle' && after.completionConfirmed === true &&
-      before.mode === after.mode && validTimestamp(before.startedAt, now) &&
+    if (!before || !after || after.state !== 'idle' || after.completionConfirmed !== true ||
+      before.mode !== after.mode || !validTimestamp(after.completedRunStartedAt, now)) return false;
+    const directlyRunning = running(before.state) && before.confirmed === true &&
       before.startedAt === after.completedRunStartedAt;
+    // A delayed completion confirmation follows a provisional idle state.
+    const settledIdle = before.state === 'idle' &&
+      validTimestamp(before.recentRunStartedAt, now) &&
+      before.recentRunStartedAt === after.completedRunStartedAt &&
+      validTimestamp(before.recentRunObservedAt, now) &&
+      before.recentRunObservedAt >= before.recentRunStartedAt &&
+      now - before.recentRunObservedAt <= 90000;
+    return directlyRunning || settledIdle;
   }
   function shouldNotifyAttention(before, after, now = Date.now()) {
     return !!before && after?.mode === 'work' && after.state === 'attention' &&

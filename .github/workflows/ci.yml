@@ -29,5 +29,6 @@ jobs:
       - name: Browser smoke tests
         run: |
           python tests/browser_smoke.py
+          python tests/failure_regression.py
           python tests/popup_smoke.py
           python tests/codex-popup-smoke.py

@@ -26,6 +26,9 @@
   let pendingAttentionSince = 0;
   let pendingFailureSince = 0;
   let pendingFailureKind = null;
+  let pendingFailureNode = null;
+  let completionNotifiedRun = null;
+  let failedRun = null;
   let lastRunningEvidenceAt = 0;
   // A verified run remains eligible for a late error after the Stop control vanishes.
   let recentRunStartedAt = null;
@@ -33,14 +36,16 @@
   // A confirmed failure remains visible while its original banner is still present.
   let latchedFailure = null;
   let previousStrongEvidence = false;
-  let lastErrorNode = null;
-  let lastErrorKind = null;
-  let lastErrorSeenAt = 0;
+  // Track the FIRST appearance of each system banner, including when React
+  // changes a banner's text in place. The DOM itself is never persisted.
+  const errorObservations = new WeakMap();
   let attentionSince = null;
   const STABLE_IDLE_MS = 1400;
   const STABLE_ATTENTION_MS = 850;
   const STABLE_FAILURE_MS = 1100;
   const FAILURE_GRACE_MS = 90000;
+  const STABLE_COMPLETION_MS = 5000; // Give delayed failure toasts time to arrive.
+  const FAILURE_REDRAW_GAP_MS = 1200;
   const previousIcons = new Map();
 
   function readOverride() {
@@ -122,17 +127,24 @@
     return false;
   }
 
-  function currentErrorKind(main) {
-    // Never read message text, generic conversation cards, or historical task logs.
-    // Errors must appear in currently visible live alert/status UI.
+  function currentErrors(main, now = Date.now()) {
+    // Inspect only dedicated system UI; never search assistant responses.
     const selectors = '[role="alert"], [role="alertdialog"], [data-testid="error-message"], [data-testid="response-error"], [data-testid="task-error"], [data-task-status], [data-work-status]';
-    for (const element of main.querySelectorAll(selectors)) {
-      if (!visible(element)) continue;
-      const raw = element.getAttribute('data-task-status') || element.getAttribute('data-work-status') || element.textContent;
+    const candidates = [];
+    for (const node of main.querySelectorAll(selectors)) {
+      if (!visible(node)) continue;
+      const raw = node.getAttribute('data-task-status') || node.getAttribute('data-work-status') || node.textContent;
       const kind = errors.classify(raw);
-      if (kind) return {kind, node: element};
+      if (!kind) continue;
+      const fingerprint = normalized(raw);
+      let observed = errorObservations.get(node);
+      if (!observed || observed.fingerprint !== fingerprint) {
+        observed = {fingerprint, since: now};
+        errorObservations.set(node, observed);
+      }
+      candidates.push({node, kind, fingerprint, since: observed.since});
     }
-    return null;
+    return candidates;
   }
 
   function attentionControlVisible(main) {
@@ -157,7 +169,7 @@
       main
     ) || anyVisible('form[data-chatgpt-composer], [data-testid="composer"]', main);
     const workTaskMarker = !!main.querySelector('[data-work-status], [data-task-status], [data-testid^="work-task-"], [data-testid^="agent-task-"]');
-    const liveError = currentErrorKind(main);
+    const liveErrors = currentErrors(main);
     return {
       enabled, override, pathname: path,
       workModeSelected: selectedWorkMode(main),
@@ -168,8 +180,9 @@
       workRunningVisible: statusVisible(main, ACTIVE_TEXT),
       workDoneVisible: statusVisible(main, DONE_TEXT),
       attentionVisible: statusVisible(main, ATTENTION_TEXT) || attentionControlVisible(document),
-      errorKind: liveError?.kind ?? null,
-      errorNode: liveError?.node ?? null
+      errorCandidates: liveErrors,
+      errorKind: null,
+      errorNode: null
     };
   }
 
@@ -222,14 +235,14 @@
         attentionSince = null;
         pendingIdleSince = pendingAttentionSince = pendingFailureSince = 0;
         pendingFailureKind = null;
+        pendingFailureNode = null;
+        completionNotifiedRun = null;
+        failedRun = null;
         lastRunningEvidenceAt = 0;
         recentRunStartedAt = null;
         recentRunMode = null;
         latchedFailure = null;
         previousStrongEvidence = false;
-        lastErrorNode = null;
-        lastErrorKind = null;
-        lastErrorSeenAt = 0;
       }
       lastPath = location.pathname;
     }
@@ -240,33 +253,62 @@
     }
     const mode = detector.modeFor(signals);
     const now = Date.now();
-    if (signals.errorNode !== lastErrorNode || signals.errorKind !== lastErrorKind) {
-      lastErrorNode = signals.errorNode;
-      lastErrorKind = signals.errorKind;
-      lastErrorSeenAt = lastErrorNode ? now : 0;
-    }
     const strongEvidenceNow = signals.stopVisible || (mode === 'work' && signals.workRunningVisible);
-    // A fresh run may start without a form submit (Work). A new rising edge
-    // invalidates an old failure only after the old Stop control disappeared.
+    // Only a new confirmed run can invalidate a latched failure.
     if (strongEvidenceNow && !previousStrongEvidence &&
         (!current || ['idle', 'unknown', 'error', 'timeout'].includes(current.state))) {
       recentRunStartedAt = null;
       recentRunMode = null;
       latchedFailure = null;
-      lastRunningEvidenceAt = 0;
       pendingFailureKind = null;
+      pendingFailureNode = null;
+      pendingIdleSince = 0;
+      completionNotifiedRun = null;
+      failedRun = null;
+      lastRunningEvidenceAt = 0;
     }
     previousStrongEvidence = strongEvidenceNow;
     const sameRecentRun = recentRunStartedAt && recentRunMode === mode;
     const withinGrace = sameRecentRun && now - lastRunningEvidenceAt <= FAILURE_GRACE_MS;
-    const sameVisibleFailure = latchedFailure && sameRecentRun &&
-      latchedFailure.node === signals.errorNode && latchedFailure.kind === signals.errorKind &&
-      latchedFailure.runStartedAt === recentRunStartedAt;
-    // A pre-existing banner, unrelated conversation, or expired unconfirmed run is not evidence.
-    if (!(sameVisibleFailure || (withinGrace && lastErrorSeenAt > recentRunStartedAt + 50))) {
-      signals.errorKind = null;
+    const candidates = signals.errorCandidates;
+    let matchedError = null;
+    if (sameRecentRun && latchedFailure && latchedFailure.runStartedAt === recentRunStartedAt) {
+      // A redraw gap begins when the error first disappears, NOT when the
+      // periodic observer last noticed it. Otherwise timer alignment could
+      // consume the entire grace period before React starts its redraw.
+      const originalPresent = candidates.some(e => e.node === latchedFailure.node &&
+        e.kind === latchedFailure.kind && e.fingerprint === latchedFailure.fingerprint);
+      if (!originalPresent && latchedFailure.missingSinceMono === null) {
+        latchedFailure.missingSinceMono = performance.now();
+      }
+      const withinRedraw = latchedFailure.missingSinceMono === null ||
+        performance.now() - latchedFailure.missingSinceMono <= FAILURE_REDRAW_GAP_MS;
+      // A prior-run banner is never eligible, even if its text is identical.
+      matchedError = candidates.find(e => e.kind === latchedFailure.kind &&
+        e.fingerprint === latchedFailure.fingerprint &&
+        (e.node === latchedFailure.node ||
+          (withinRedraw && e.since > recentRunStartedAt))) || null;
+      if (matchedError) latchedFailure.missingSinceMono = null;
     }
-    if (!sameVisibleFailure) latchedFailure = null;
+    if (!matchedError && withinGrace && !latchedFailure) {
+      // Multiple alerts can coexist. Prefer a new banner belonging to this run
+      // rather than the first, potentially historical, matching DOM element.
+      matchedError = candidates.filter(e => e.since > recentRunStartedAt + 50)
+        .sort((a,b) => b.since - a.since)[0] || null;
+    }
+    // If the old error disappeared, do not latch an unrelated banner.
+    // A two-phase React remount can briefly leave no matching node. Keep only
+    // the identity (not a success/error assertion) for a bounded redraw gap.
+    if (!matchedError && latchedFailure && latchedFailure.missingSinceMono !== null) {
+      const remaining = FAILURE_REDRAW_GAP_MS -
+        (performance.now() - latchedFailure.missingSinceMono);
+      if (remaining <= 0) latchedFailure = null;
+      else setTimeout(evaluate, remaining + 30);
+    }
+    // During a short React redraw gap, keep the *already confirmed* error
+    // visible instead of inventing a new run from a persistent Stop control.
+    signals.errorKind = matchedError?.kind || latchedFailure?.kind || null;
+    signals.errorNode = matchedError?.node || latchedFailure?.node || null;
     const candidate = detector.stateFor(signals);
     const previous = current;
     let state = candidate;
@@ -275,18 +317,27 @@
     let failureRunStartedAt = null;
     const wasRunning = previous && ['thinking', 'working'].includes(previous.state);
 
-    // A momentary disappearance of the Stop button is not a completed response.
-    if (candidate === 'idle' && wasRunning && previous.mode === mode) {
+    // The composer returning is only provisional: delayed error banners may
+    // appear after Stop disappears. Keep the run ID while idle and postpone
+    // the opt-in completion notice until the UI has settled without errors.
+    const eligibleForCompletion = candidate === 'idle' && sameRecentRun &&
+      !failedRun && completionNotifiedRun !== recentRunStartedAt &&
+      (mode === 'chat' ? signals.composerVisible : signals.workDoneVisible);
+    if (eligibleForCompletion &&
+        (wasRunning || previous?.state === 'idle' && previous.mode === mode)) {
       if (!pendingIdleSince) {
         pendingIdleSince = now;
         setTimeout(evaluate, STABLE_IDLE_MS + 20);
+        setTimeout(evaluate, STABLE_COMPLETION_MS + 30);
       }
-      if (now - pendingIdleSince < STABLE_IDLE_MS) state = previous.state;
-      else if (previous.confirmed === true && (mode === 'chat' && signals.composerVisible || mode === 'work' && signals.workDoneVisible)) {
-        completedRunStartedAt = previous.startedAt;
+      if (now - pendingIdleSince < STABLE_IDLE_MS) {
+        state = wasRunning ? previous.state : 'idle';
+      } else if (now - pendingIdleSince >= STABLE_COMPLETION_MS) {
+        completedRunStartedAt = recentRunStartedAt;
         completionConfirmed = true;
+        completionNotifiedRun = recentRunStartedAt;
       }
-    } else {
+    } else if (candidate !== 'idle' || !sameRecentRun || failedRun) {
       pendingIdleSince = 0;
     }
 
@@ -307,22 +358,36 @@
 
     // A transient error banner is not a failure. Require stable, same-kind evidence.
     if (candidate === 'error' || candidate === 'timeout') {
-      if (pendingFailureKind !== signals.errorKind) {
-        pendingFailureKind = signals.errorKind;
-        pendingFailureSince = now;
-        setTimeout(evaluate, STABLE_FAILURE_MS + 30);
-      }
-      if (now - pendingFailureSince < STABLE_FAILURE_MS) {
-        state = wasRunning ? previous.state : 'unknown';
-      } else {
+      if (latchedFailure && latchedFailure.runStartedAt === recentRunStartedAt &&
+          latchedFailure.kind === signals.errorKind) {
+        // This is the same previously confirmed failure, possibly mid-redraw.
         failureRunStartedAt = recentRunStartedAt;
-        latchedFailure = {
-          node: signals.errorNode, kind: signals.errorKind,
-          runStartedAt: recentRunStartedAt
+        if (matchedError) latchedFailure = {
+          ...latchedFailure, node: matchedError.node, missingSinceMono: null
         };
+      } else {
+        if (pendingFailureKind !== signals.errorKind || pendingFailureNode !== signals.errorNode) {
+          pendingFailureKind = signals.errorKind;
+          pendingFailureNode = signals.errorNode;
+          pendingFailureSince = now;
+          setTimeout(evaluate, STABLE_FAILURE_MS + 30);
+        }
+        if (now - pendingFailureSince < STABLE_FAILURE_MS) {
+          state = wasRunning ? previous.state : 'unknown';
+        } else {
+          failureRunStartedAt = recentRunStartedAt;
+          latchedFailure = {
+            node: matchedError.node, kind: matchedError.kind,
+            fingerprint: matchedError.fingerprint, missingSinceMono: null,
+            runStartedAt: recentRunStartedAt
+          };
+          failedRun = recentRunStartedAt;
+          pendingIdleSince = 0;
+        }
       }
     } else {
       pendingFailureKind = null;
+      pendingFailureNode = null;
       pendingFailureSince = 0;
     }
 
@@ -342,6 +407,8 @@
       recentRunStartedAt = null;
       recentRunMode = null;
       latchedFailure = null;
+      failedRun = null;
+      pendingIdleSince = 0;
     }
     current = {
       state, mode, override, reason: detector.reasonFor(signals, state), enabled,
@@ -385,6 +452,10 @@
       latchedFailure = null;
       lastRunningEvidenceAt = 0;
       pendingFailureKind = null;
+      pendingFailureNode = null;
+      pendingIdleSince = 0;
+      completionNotifiedRun = null;
+      failedRun = null;
       optimisticUntil = Date.now() + 3500;
       schedule();
     }
@@ -408,14 +479,14 @@
       attentionSince = null;
       pendingIdleSince = pendingAttentionSince = pendingFailureSince = 0;
       pendingFailureKind = null;
+      pendingFailureNode = null;
+      completionNotifiedRun = null;
+      failedRun = null;
       lastRunningEvidenceAt = 0;
       recentRunStartedAt = null;
       recentRunMode = null;
       latchedFailure = null;
       previousStrongEvidence = false;
-      lastErrorNode = null;
-      lastErrorKind = null;
-      lastErrorSeenAt = 0;
       optimisticUntil = 0;
       evaluate();
       reply(current);
