@@ -156,6 +156,16 @@
     return newest;
   }
 
+  function errorMessageWithoutControls(node) {
+    // System banners often contain a Retry button. Button labels are not
+    // part of the error message and must not defeat strict classification.
+    const copy = node.cloneNode(true);
+    for (const control of copy.querySelectorAll('button, a, input, select, textarea, svg, [role="button"]')) {
+      control.remove();
+    }
+    return copy.textContent || '';
+  }
+
   function currentErrors(main, now = Date.now()) {
     // An alert must belong to the live conversation/task area, not a settings
     // dialog, toast in a navigation panel, or historical conversation content.
@@ -163,15 +173,23 @@
     const candidates = [];
     for (const node of main.querySelectorAll(selectors)) {
       if (!visible(node) || node.closest(NON_TASK_ALERT_CONTEXT)) continue;
-      const raw = node.getAttribute('data-task-status') || node.getAttribute('data-work-status') || node.textContent;
-      const kind = errors.classify(raw);
+      const status = normalized(node.getAttribute('data-task-status') || node.getAttribute('data-work-status'));
+      const message = errorMessageWithoutControls(node);
+      // Parse status attributes and visible copy independently: a machine
+      // status of "failed" can accompany a useful "Task failed" message.
+      const kind = errors.classify(message) || errors.classify(status) ||
+        ((node.hasAttribute('data-task-status') || node.hasAttribute('data-work-status')) &&
+         /^(failed|failure)$/.test(status) ? 'generation' : null);
       if (!kind) continue;
-      const fingerprint = normalized(raw);
+      const fingerprint = normalized(message || status);
       let observed = errorObservations.get(node);
-      if (!observed || observed.fingerprint !== fingerprint) {
-        observed = {fingerprint, since: now};
+      if (!observed) {
+        observed = {since: now};
         errorObservations.set(node, observed);
       }
+      // The *first* observation belongs to the DOM node, not to its current
+      // wording. Updating an old error's text must never turn it into a new
+      // error belonging to a later request.
       candidates.push({node, kind, fingerprint, since: observed.since});
     }
     return candidates;
@@ -191,7 +209,7 @@
     return false;
   }
 
-  function getSignals() {
+  function getSignals(now = Date.now()) {
     const main = document.querySelector('main') || document.body;
     const path = location.pathname;
     const composerVisible = anyVisible(
@@ -199,8 +217,8 @@
       main
     ) || anyVisible('form[data-chatgpt-composer], [data-testid="composer"]', main);
     const workTaskMarker = !!main.querySelector('[data-work-status], [data-task-status], [data-testid^="work-task-"], [data-testid^="agent-task-"]');
-    const liveErrors = currentErrors(main);
-    const doneObservedAt = completionEvidenceAt(main);
+    const liveErrors = currentErrors(main, now);
+    const doneObservedAt = completionEvidenceAt(main, now);
     return {
       enabled, override, pathname: path,
       workModeSelected: selectedWorkMode(main),
@@ -282,13 +300,15 @@
       }
       lastPath = location.pathname;
     }
-    const signals = getSignals();
+    // Sample the UI at one time: a Stop control and a system error may
+    // first appear in the same DOM mutation batch.
+    const now = Date.now();
+    const signals = getSignals(now);
     if (signals.stopVisible) {
       optimisticUntil = 0;
       signals.optimisticSend = false;
     }
     const mode = detector.modeFor(signals);
-    const now = Date.now();
     const strongEvidenceNow = signals.stopVisible || (mode === 'work' && signals.workRunningVisible);
     // Only a new confirmed run can invalidate a latched failure.
     if (strongEvidenceNow && !previousStrongEvidence &&
@@ -332,7 +352,10 @@
     if (!matchedError && withinGrace && !latchedFailure) {
       // Multiple alerts can coexist. Prefer a new banner belonging to this run
       // rather than the first, potentially historical, matching DOM element.
-      matchedError = candidates.filter(e => e.since > recentRunStartedAt + 50)
+      // Equal timestamps are intentional: verified Stop and a new error can
+      // appear together in a single mutation frame. Previously observed
+      // banners retain their earlier 'since' across text changes.
+      matchedError = candidates.filter(e => e.since >= recentRunStartedAt)
         .sort((a,b) => b.since - a.since)[0] || null;
     }
     // If the old error disappeared, do not latch an unrelated banner.
@@ -444,6 +467,12 @@
       recentRunMode = mode;
       lastRunningEvidenceAt = now;
       latchedFailure = null;
+      // During this evaluation the run did not yet have an ID when error
+      // candidates were checked. Re-evaluate only when a new banner was
+      // observed in the exact same frame as the newly confirmed run.
+      if (!sameRun && signals.errorCandidates.some(e => e.since === startedAt)) {
+        setTimeout(evaluate, 30);
+      }
     }
     if (state === 'disabled') {
       recentRunStartedAt = null;

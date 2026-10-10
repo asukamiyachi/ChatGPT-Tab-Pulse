@@ -83,6 +83,7 @@ for f in background.js popup.js src/*.js; do node --check "$f"; done
 python3 tests/browser_smoke.py
 python3 tests/failure_regression.py
 python3 tests/review_regression.py
+python3 tests/failure_edges.py
 python3 tests/popup_smoke.py
 python3 tests/codex-popup-smoke.py
 ```
