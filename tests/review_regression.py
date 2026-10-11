@@ -120,5 +120,50 @@ with sync_playwright() as p:
         no_completion(page)
         print('PASS: stale previous-run completion marker is rejected',flush=True)
         page.close()
+
+        # Reuse exactly the same alert node across two different runs.
+        # A real recovery (error -> normal) must reset its occurrence time.
+        page=open_page(browser)
+        show_stop(page)
+        page.evaluate("""() => {
+          const a=document.createElement('div');a.id='reused-alert';
+          a.setAttribute('role','alert');a.textContent='Request timed out';
+          document.querySelector('main').appendChild(a)
+        }""")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('timeout-32.png')")
+        first=page.evaluate("""() => {let x;listener({type:'GET_STATUS'}, {}, r=>x=r);return x.failureRunStartedAt;}""")
+        page.evaluate("""() => {
+          document.querySelector('[data-testid=stop-button]').remove();
+          document.querySelector('#reused-alert').textContent='Working';
+        }""")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('idle-32.png')",timeout=6000)
+        show_stop(page)
+        second=page.evaluate("""() => {let x;listener({type:'GET_STATUS'}, {}, r=>x=r);return x.startedAt;}""")
+        assert first and second and first != second, (first,second)
+        page.evaluate("document.querySelector('#reused-alert').textContent='Network error'")
+        page.wait_for_function("document.querySelector('#chatgpt-tab-pulse-icon')?.href.includes('error-32.png')",timeout=4500)
+        result=page.evaluate("""() => {let x;listener({type:'GET_STATUS'}, {}, r=>x=r);return x;}""")
+        assert result['errorKind']=='network' and result['failureRunStartedAt']==second, result
+        print('PASS: same alert node error -> normal -> new error belongs to new run',flush=True)
+        page.close()
+
+        # Existing Completed -> Running -> Completed element must be a new
+        # completion, whereas a never-changing historical Completed is ignored.
+        page=open_page(browser)
+        add_done(page)
+        page.wait_for_timeout(400)
+        page.evaluate("document.querySelector('[role=status]').textContent='Running'")
+        page.wait_for_timeout(400)
+        show_stop(page)
+        run=page.evaluate("""() => {let x;listener({type:'GET_STATUS'}, {}, r=>x=r);return x.startedAt;}""")
+        page.evaluate("""() => {
+          document.querySelector('[data-testid=stop-button]').remove();
+          document.querySelector('[role=status]').textContent='Completed';
+        }""")
+        page.wait_for_function("messages.some(x=>x.completionConfirmed)",timeout=8500)
+        successes=page.evaluate("messages.filter(x=>x.completionConfirmed)")
+        assert len(successes)==1 and successes[0]['completedRunStartedAt']==run,successes
+        print('PASS: reused status node Completed -> Running -> Completed is a fresh completion',flush=True)
+        page.close()
     finally:
         browser.close()

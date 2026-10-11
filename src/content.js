@@ -145,13 +145,15 @@
       if (!visible(node) || node.closest(NON_TASK_ALERT_CONTEXT)) continue;
       const raw = node.getAttribute('data-work-status') || node.getAttribute('data-task-status') || node.textContent;
       const fingerprint = normalized(raw);
-      if (fingerprint.length > 100 || !DONE_TEXT.test(fingerprint)) continue;
+      const done = fingerprint.length <= 100 && DONE_TEXT.test(fingerprint);
       let observed = completionObservations.get(node);
-      if (!observed || observed.fingerprint !== fingerprint) {
-        observed = {fingerprint, since: now};
+      // Observe both edges: Completed -> Running -> Completed on the same
+      // element is a new completion; changing Completed wording is not.
+      if (!observed || observed.done !== done) {
+        observed = {done, since: now};
         completionObservations.set(node, observed);
       }
-      newest = Math.max(newest, observed.since);
+      if (done) newest = Math.max(newest, observed.since);
     }
     return newest;
   }
@@ -180,16 +182,17 @@
       const kind = errors.classify(message) || errors.classify(status) ||
         ((node.hasAttribute('data-task-status') || node.hasAttribute('data-work-status')) &&
          /^(failed|failure)$/.test(status) ? 'generation' : null);
-      if (!kind) continue;
-      const fingerprint = normalized(message || status);
+      const isError = !!kind;
       let observed = errorObservations.get(node);
-      if (!observed) {
-        observed = {since: now};
+      // Track recovery even when this element is not an error. A later
+      // normal -> error transition is new evidence for a new run, whereas
+      // timeout -> network without an intervening normal state is not.
+      if (!observed || observed.isError !== isError) {
+        observed = {isError, since: now};
         errorObservations.set(node, observed);
       }
-      // The *first* observation belongs to the DOM node, not to its current
-      // wording. Updating an old error's text must never turn it into a new
-      // error belonging to a later request.
+      if (!isError) continue;
+      const fingerprint = normalized(message || status);
       candidates.push({node, kind, fingerprint, since: observed.since});
     }
     return candidates;
