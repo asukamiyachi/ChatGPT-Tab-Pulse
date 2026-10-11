@@ -11,7 +11,7 @@
     <header>
       <div class="logo" aria-hidden="true">P</div>
       <div class="brand-text">
-        <h1>ChatGPT Tab Pulse <span class="version">v0.5</span></h1>
+        <h1>ChatGPT Tab Pulse <span class="version">v0.6</span></h1>
         <p class="subtitle">推論・Work のリアルタイム状態</p>
       </div>
     </header>
@@ -42,6 +42,7 @@
         <div id="state-reason" class="state-reason">現在のタブを確認しています</div>
       </div>
     </section>
+    <p id="recovery-note" class="recovery-note" role="status" hidden></p>
     <div id="domain-note" class="domain-note" hidden>現在のタブはChatGPTではありません。上の一覧から切り替えられます。</div>
 
     <section class="options">
@@ -70,15 +71,24 @@
         <span><strong>Work確認待ちを通知</strong><small>承認・入力待ちの画面を検出</small></span>
         <input type="checkbox" id="notifyAttention">
       </label>
+      <label class="switch-row" for="notifyFailure">
+        <span><strong>明示的なエラーを通知</strong><small>現在の処理に紐づく表示が確定した場合のみ</small></span>
+        <input type="checkbox" id="notifyFailure">
+      </label>
       <label class="switch-row" for="notifyLongRunning">
-        <span><strong>長時間実行を通知</strong><small>指定時間を超えたタスクを1回だけ通知</small></span>
+        <span><strong>長時間実行を通知</strong><small>タイムアウトとは断定せず確認を促す</small></span>
         <input type="checkbox" id="notifyLongRunning">
       </label>
       <div class="field timer-select">
-        <label for="longRunningMinutes">通知までの時間</label>
-        <select id="longRunningMinutes">
+        <label for="chatLongMinutes">通常Chat：注意までの時間</label>
+        <select id="chatLongMinutes">
           <option value="5">5分</option><option value="10">10分</option><option value="15">15分</option>
-          <option value="30">30分</option><option value="60">60分</option>
+          <option value="20">20分</option><option value="30">30分</option><option value="45">45分</option><option value="60">60分</option>
+        </select>
+        <label for="workLongMinutes">Work：注意までの時間</label>
+        <select id="workLongMinutes">
+          <option value="5">5分</option><option value="10">10分</option><option value="15">15分</option>
+          <option value="20">20分</option><option value="30">30分</option><option value="45">45分</option><option value="60">60分</option>
         </select>
       </div>
       <p id="notification-status" class="setting-note" role="status" aria-live="polite">通知をオンにした時だけChromeの許可を求めます。</p>
@@ -113,6 +123,8 @@
       <div><img src="icons/working-32.png" alt=""><span>Work 実行中</span></div>
       <div><img src="icons/attention-32.png" alt=""><span>Work 確認待ち</span></div>
       <div><img src="icons/unknown-32.png" alt=""><span>状態不明</span></div>
+      <div><img src="icons/error-32.png" alt=""><span>処理エラー</span></div>
+      <div><img src="icons/timeout-32.png" alt=""><span>タイムアウト表示</span></div>
     </div>
     <footer>非公式・ローカル動作 / 会話の内容は収集しません</footer>
   </main>

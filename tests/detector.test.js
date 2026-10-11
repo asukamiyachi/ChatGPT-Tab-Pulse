@@ -22,3 +22,11 @@ test('Work: no stop button is NOT completion', () => assert.equal(detect({overri
 test('Work: approval takes priority over an active stop button', () => assert.equal(detect({override:'work',stopVisible:true,attentionVisible:true}),'attention'));
 test('Disabled always disabled', () => assert.equal(detect({enabled:false,stopVisible:true}),'disabled'));
 test('Work unknown has diagnostic explanation', () => assert.match(reasonFor({...base,override:'work'},'unknown'), /確認できません/));
+
+test('explicit errors preempt running and approval, but never infer from time',()=>{
+  assert.equal(detect({stopVisible:true,errorKind:'timeout'}),'timeout');
+  assert.equal(detect({override:'work',attentionVisible:true,errorKind:'network'}),'error');
+  assert.equal(detect({stopVisible:true,errorKind:'garbage'}),'thinking');
+  assert.equal(detect({stopVisible:true,elapsedMinutes:150}),'thinking');
+  assert.match(reasonFor({...base,errorKind:'network'},'error'),/通信エラー/);
+});

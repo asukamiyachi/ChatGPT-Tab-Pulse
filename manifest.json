@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Tab Pulse",
-  "version": "0.5.0",
-  "description": "ChatGPT Chat/Workのタブ状態と実行時間を表示し、任意で完了・確認待ち・長時間実行を通知し、Codex使用枠を表示します。",
+  "version": "0.6.0",
+  "description": "ChatGPT Chat/Workの実行・完了・確認待ち、明示的な異常、長時間実行を通知し、任意でCodex使用枠を表示します。",
   "permissions": [
     "storage",
     "alarms"
@@ -31,6 +31,7 @@
       ],
       "js": [
         "src/detector.js",
+        "src/error-detection.js",
         "src/content.js"
       ],
       "run_at": "document_idle",
@@ -44,7 +45,9 @@
         "icons/thinking-32.png",
         "icons/working-32.png",
         "icons/attention-32.png",
-        "icons/unknown-32.png"
+        "icons/unknown-32.png",
+        "icons/error-32.png",
+        "icons/timeout-32.png"
       ],
       "matches": [
         "https://chatgpt.com/*",

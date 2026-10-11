@@ -5,9 +5,12 @@
     notifyCompleted: false,
     notifyAttention: false,
     notifyLongRunning: false,
-    longRunningMinutes: 10
+    longRunningMinutes: 10,
+    chatLongMinutes: 5,
+    workLongMinutes: 20,
+    notifyFailure: false
   });
-  const VALID_MINUTES = Object.freeze([5, 10, 15, 30, 60]);
+  const VALID_MINUTES = Object.freeze([5, 10, 15, 20, 30, 45, 60]);
   const running = (state) => state === 'thinking' || state === 'working';
   const validTimestamp = (value, now = Date.now()) =>
     Number.isSafeInteger(value) && value > 0 && value <= now + 2000 && value > now - 7 * 86400000;
@@ -16,18 +19,45 @@
       notifyCompleted: data.notifyCompleted === true,
       notifyAttention: data.notifyAttention === true,
       notifyLongRunning: data.notifyLongRunning === true,
-      longRunningMinutes: VALID_MINUTES.includes(Number(data.longRunningMinutes)) ? Number(data.longRunningMinutes) : 10
+      longRunningMinutes: VALID_MINUTES.includes(Number(data.longRunningMinutes)) ? Number(data.longRunningMinutes) : 10,
+      chatLongMinutes: VALID_MINUTES.includes(Number(data.chatLongMinutes)) ? Number(data.chatLongMinutes) : 5,
+      workLongMinutes: VALID_MINUTES.includes(Number(data.workLongMinutes)) ? Number(data.workLongMinutes) : 20,
+      notifyFailure: data.notifyFailure === true
     };
   }
   function shouldNotifyCompletion(before, after, now = Date.now()) {
-    return !!before && !!after && running(before.state) && before.confirmed === true &&
-      after.state === 'idle' && after.completionConfirmed === true &&
-      before.mode === after.mode && validTimestamp(before.startedAt, now) &&
+    if (!before || !after || after.state !== 'idle' || after.completionConfirmed !== true ||
+      before.mode !== after.mode || !validTimestamp(after.completedRunStartedAt, now)) return false;
+    const directlyRunning = running(before.state) && before.confirmed === true &&
       before.startedAt === after.completedRunStartedAt;
+    // A delayed completion confirmation follows a provisional idle state.
+    const settledIdle = before.state === 'idle' &&
+      validTimestamp(before.recentRunStartedAt, now) &&
+      before.recentRunStartedAt === after.completedRunStartedAt &&
+      validTimestamp(before.recentRunObservedAt, now) &&
+      before.recentRunObservedAt >= before.recentRunStartedAt &&
+      now - before.recentRunObservedAt <= 90000;
+    return directlyRunning || settledIdle;
   }
   function shouldNotifyAttention(before, after, now = Date.now()) {
     return !!before && after?.mode === 'work' && after.state === 'attention' &&
       before.state !== 'attention' && validTimestamp(after.attentionSince, now);
+  }
+  function shouldNotifyFailure(before, after, now = Date.now()) {
+    if (!before || !after || !['timeout', 'error'].includes(after.state) || before.mode !== after.mode ||
+      !validTimestamp(after.failureRunStartedAt, now)) return false;
+    const directlyRunning = running(before.state) && before.confirmed === true &&
+      before.startedAt === after.failureRunStartedAt;
+    // After the Stop button disappears, an error may arrive after the idle debounce.
+    // Accept only the same previously verified run with recent evidence; never an old tab state.
+    const recentVerified = ['idle', 'unknown'].includes(before.state) &&
+      validTimestamp(before.recentRunStartedAt, now) &&
+      before.recentRunStartedAt === after.failureRunStartedAt &&
+      validTimestamp(before.recentRunObservedAt, now) &&
+      before.recentRunObservedAt >= before.recentRunStartedAt &&
+      now - before.recentRunObservedAt <= 90000;
+    return (directlyRunning || recentVerified) &&
+      (after.state === 'timeout' ? after.errorKind === 'timeout' : ['network', 'generation'].includes(after.errorKind));
   }
   function shouldNotifyLong(record, now, minutes) {
     return running(record?.state) && record.confirmed === true &&
@@ -42,7 +72,7 @@
     return hours ? `${hours}時間${mins}分` : mins ? `${mins}分${secs}秒` : `${secs}秒`;
   }
   const api = Object.freeze({ DEFAULTS, VALID_MINUTES, settingsFor, validTimestamp,
-    running, shouldNotifyCompletion, shouldNotifyAttention, shouldNotifyLong, elapsed });
+    running, shouldNotifyCompletion, shouldNotifyAttention, shouldNotifyFailure, shouldNotifyLong, elapsed });
   root.TabPulseNotifications = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

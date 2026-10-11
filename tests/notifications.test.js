@@ -39,3 +39,47 @@ test('elapsed time never returns unverified timestamps',()=>{
   assert.equal(alerts.elapsed(null,now),'');
   assert.equal(alerts.elapsed('12',now),'');
 });
+
+test('failure requires current verified run and matching run id',()=>{
+  const failure={state:'timeout',mode:'chat',errorKind:'timeout',failureRunStartedAt:start};
+  assert.equal(alerts.shouldNotifyFailure(running,failure,now),true);
+  assert.equal(alerts.shouldNotifyFailure(null,failure,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...running,confirmed:false},failure,now),false);
+  assert.equal(alerts.shouldNotifyFailure(running,{...failure,failureRunStartedAt:start+1},now),false);
+  assert.equal(alerts.shouldNotifyFailure({...running,mode:'work'},failure,now),false);
+  assert.equal(alerts.shouldNotifyFailure(running,{...failure,state:'error',errorKind:'generation'},now),true);
+  assert.equal(alerts.shouldNotifyFailure(running,{...failure,state:'error',errorKind:'timeout'},now),false);
+  assert.equal(alerts.shouldNotifyCompletion(failure,completed,now),false);
+});
+
+test('late failure after idle requires the same recently verified run',()=>{
+  const observed=now-2000;
+  const before={state:'idle',mode:'chat',confirmed:false,recentRunStartedAt:start,recentRunObservedAt:observed};
+  const after={state:'timeout',mode:'chat',errorKind:'timeout',failureRunStartedAt:start};
+  assert.equal(alerts.shouldNotifyFailure(before,after,now),true);
+  assert.equal(alerts.shouldNotifyFailure({...before,state:'unknown'},after,now),true);
+  assert.equal(alerts.shouldNotifyFailure({...before,recentRunObservedAt:now-91000},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,recentRunStartedAt:start+1},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,recentRunObservedAt:start-1},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,mode:'work'},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,state:'disabled'},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,state:'error'},after,now),false);
+  assert.equal(alerts.shouldNotifyFailure({...before,recentRunObservedAt:null},after,now),false);
+});
+
+test('mode thresholds default 5/20 and notifications are opt-in',()=>{
+  assert.equal(alerts.settingsFor({}).chatLongMinutes,5);
+  assert.equal(alerts.settingsFor({}).workLongMinutes,20);
+  assert.equal(alerts.settingsFor({}).notifyFailure,false);
+  assert.equal(alerts.settingsFor({notifyFailure:true,chatLongMinutes:15,workLongMinutes:45}).notifyFailure,true);
+});
+
+
+test('settled idle completion requires same previously confirmed run',()=>{
+  const idle={state:'idle',mode:'chat',recentRunStartedAt:start,recentRunObservedAt:now-6000};
+  assert.equal(alerts.shouldNotifyCompletion(idle,completed,now),true);
+  assert.equal(alerts.shouldNotifyCompletion({...idle,recentRunStartedAt:start+3},completed,now),false);
+  assert.equal(alerts.shouldNotifyCompletion({...idle,recentRunObservedAt:now-91000},completed,now),false);
+  assert.equal(alerts.shouldNotifyCompletion({...idle,state:'timeout'},completed,now),false);
+  assert.equal(alerts.shouldNotifyCompletion({...idle,recentRunObservedAt:null},completed,now),false);
+});

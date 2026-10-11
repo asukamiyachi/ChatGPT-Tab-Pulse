@@ -18,7 +18,7 @@ test('unknown state values are normalized', () => {
 test('counts all tabs; only thinking+working count as active', () => {
   assert.deepEqual(countsFor([{state:'thinking'},{state:'working'},{state:'attention'},
     {state:'idle'},{state:'unknown'},{state:'disabled'},{state:'BOGUS'}]),
-  {total:7, idle:1, thinking:1, working:1, attention:1, unknown:2, disabled:1, running:2});
+  {total:7, idle:1, thinking:1, working:1, attention:1, unknown:2, disabled:1, error:0, timeout:0, running:2});
 });
 test('badge displays concurrent jobs, not total tabs', () => {
   assert.deepEqual(badgeFor(countsFor([{state:'thinking'},{state:'working'},{state:'idle'}])),
@@ -41,4 +41,12 @@ test('current tab goes first and attention is prioritised', () => {
   ];
   assert.deepEqual(sortTabs(tabs).map(t=>t.id),[3,2,4,1]);
   assert.equal(tabs[0].id,1,'sort should not mutate input');
+});
+
+test('explicit errors are not running and take badge priority', () => {
+  const counts = countsFor([{state:'thinking'},{state:'timeout'},{state:'error'}]);
+  assert.equal(counts.running,1);
+  assert.equal(counts.timeout,1);
+  assert.equal(counts.error,1);
+  assert.deepEqual(badgeFor(counts),{text:'!',color:'#BD3434'});
 });
